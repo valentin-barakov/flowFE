@@ -1,0 +1,35 @@
+{
+  "name": "flowfe",
+  "productName": "Mango",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mango is a local Mac app that chats with one Cursor agent in a chosen folder.",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "dist/main/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json",
+    "check:questions": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/phase3-questions-check.ts",
+    "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts && vite build --config vite.renderer.config.ts",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 && node scripts/packaged-sdk-check.mjs",
+    "spike": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/phase0-spike.ts"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.2.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  }
+}
