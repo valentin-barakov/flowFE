@@ -36,6 +36,12 @@ export function itemUrl(repo: string, kind: GithubItemKind, number: number): str
   return `https://github.com/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}`;
 }
 
+/** The message a Review button sends to the repo's agent, or null when the repo or the number is not acceptable. */
+export function reviewPrompt(repo: string, number: number): string | null {
+  const url = itemUrl(repo, "pr", number);
+  return url === null ? null : `review pr ${url}`;
+}
+
 /** `hello` from `octo/hello`. */
 export function shortRepoName(fullName: string): string {
   const slash = fullName.indexOf("/");

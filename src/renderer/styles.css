@@ -1005,6 +1005,37 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
   font-size: 12px;
   cursor: pointer;
 }
+.gh-pr-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gh-review-start {
+  font-size: 12px;
+  padding: 2px 10px;
+}
+.gh-review-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.gh-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gh-spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+}
 .gh-pr:hover { border-color: var(--accent); }
 .gh-pr.approved-by-you,
 .gh-pr.approved-by-you:hover {
@@ -1017,12 +1048,14 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
 }
 .gh-pr .ticket-meta { grid-column: auto; }
 .gh-review-approved,
-.gh-ci-passing {
+.gh-ci-passing,
+.gh-verdict-yes {
   color: var(--ok);
   border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
 }
 .gh-review-changes,
-.gh-ci-failing {
+.gh-ci-failing,
+.gh-verdict-no {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
 }

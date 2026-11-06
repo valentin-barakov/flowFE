@@ -18,7 +18,7 @@ The only deliverable is **one markdown file**.
 - Do **not** scaffold a scratch folder to prove the code works. If something cannot be verified by reading the codebase, write it down under Edge Cases or Open questions.
 - Documentation edits are written **as text in the plan** (last step). Do not apply them while writing.
 - A plan for a big feature is still one file. If it is too big, split it into several plans, never into code.
-- Execute a plan only when the user asks in a separate request ("implement the plan", "do step 3"). That request uses the `execute-steps` skill, not this one.
+- Execute a plan only when the user asks in a separate request. "Implement the plan" and `/implement-plan` follow the user skill `~/.cursor/skills/implement-plan/SKILL.md`. "Do step 3" and "execute the steps" follow `execute-steps`. Neither request uses this skill.
 
 ## Where the plan goes
 
@@ -210,7 +210,7 @@ Code that changes behavior makes some documents wrong. This step finds them and 
 
 ## While executing a plan
 
-Do not execute a plan from this skill. When the user asks to execute, implement, or run a plan or named steps, follow [execute-steps](../execute-steps/SKILL.md). It consumes a plan written here: it implements only the steps the user named, verifies each one, updates the plan's `✅` markers, and runs Documentation Update last.
+Do not execute a plan from this skill. When the user asks to implement a plan, or says `/implement-plan`, read and follow `~/.cursor/skills/implement-plan/SKILL.md`. When the user asks to run named steps ("do step 3", "execute the steps"), follow [execute-steps](../execute-steps/SKILL.md). It implements only the steps the user named, verifies each one, updates the plan's `✅` markers, and runs Documentation Update last.
 
 ## Resources
 

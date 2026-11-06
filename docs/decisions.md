@@ -64,9 +64,9 @@ Messages are stored by Mango. On a failed or slow resume, create a new agent see
 
 ### D-11: User-level rules are overridden, not edited (accepted)
 
-The app never writes `~/.cursor`. The agent is created with `settingSources: ["project"]`, so the user layer is not requested. Each send starts with that override line, then a second line that tells the agent to call `ask_user_question`. Both lines are part of the prompt `prompt.ts` builds. They are not written into `~/.cursor` or the project.
-**Reason:** Valentin, 2026-11-05. Editing `~/.cursor` would change his other Cursor projects. He still wants this agent's run to prefer the project.
-**Rejected:** editing `~/.cursor` from the app; leaving user rules in force with no override.
+The app never writes `~/.cursor`. The agent is created with `settingSources: ["project", "user"]`, so the user layer is loaded. Each send starts with a line that a user-level instruction wins over a project one, then a line that tells the agent to call `ask_user_question`, then a line that says implementing a plan follows `~/.cursor/skills/implement-plan/SKILL.md` and not the project `execute-steps` skill, then a line that says reviewing a pull request follows `~/.cursor/skills/pr-review/SKILL.md`. Those lines are part of the prompt `prompt.ts` builds. They are not written into `~/.cursor` or the project.
+**Reason:** Valentin, 2026-11-06. Editing `~/.cursor` would change his other Cursor projects. He wants this agent to follow his user skills, including `implement-plan`, ahead of the project's `execute-steps` skill. `implement-plan` is not auto-invoked (`disable-model-invocation`), so the prompt names the file. A review of public-link-front #68 the same day received `review pr <url>` and did not open `pr-review`, so that file is named the same way.
+**Rejected:** editing `~/.cursor` from the app; leaving the project `execute-steps` skill to handle "implement the plan".
 **Still open:** the Phase 0 log loaded 23 skills that were not in the temp folder. `settingSources: ["project"]` may not be a complete block. The prepended line is the override until that source is known.
 
 ### D-12: No read-only mode in v1 (accepted)
@@ -112,6 +112,14 @@ Two optional sections, each behind its own token, both classic personal access t
 **Accepted trade-off:** a classic `repo` token can write to GitHub, and a classic token cannot be limited to chosen repositories. Mango only reads. Setup says so and tells the user to set an expiry of 30 to 90 days, because GitHub's token page URL cannot preset one.
 **Still open:** the live lists need real tokens, repos, and a project. They are manual checks, not part of `npm run check:github`. Octokit, an "assigned to me" filter on the Projects board, and org-owned projects can be added later.
 
+### D-18: A pull request card starts a review as an ordinary chat message (accepted)
+
+A card for a pull request the user has not approved has a **Review** button, shown only when the workspace has a checkout whose `origin` is that repo. The button sends `review pr https://github.com/<owner>/<repo>/pull/<n>` to that repo's one chat through the same path as the chat box (`flow:chat.send`), so the 7-agent cap, the busy message, Agent or Plan mode, events, and history all apply. The card shows a spinner while that repo's chat is running exactly that message, read from the chat slice, not from a second run record. `flow:github.reviewReady` reports whether `pr-reviews/<n>.md` is saved, from disk only, and the card shows **See review** when it is. The same read returns `verdict` from a `## Verdict` section at the top of that file, and the card shows **Yes** or **No**. `flow:github.prs` returns `checkout` (the workspace repo name) so the card can decide before the click.
+**Reason:** Valentin, 2026-11-06. The review is the user's own `pr-review` skill, which already saves `pr-reviews/<n>.md`. Sending its trigger phrase as a chat message adds no run machinery, no GitHub write, and no new boundary, and a review is visible in the chat like any other run.
+**Rejected:** a new IPC command that starts a run (a second path past the busy and cap checks, for no gain); a separate agent or a second chat per repo (D-5); the card keeping its own run state from events (it would disagree with the sidebar after leaving the pane); polling GitHub or re-listing PRs to find the file (a token request every 2 seconds); showing the markdown in the card (the file opens in the system app, like **Review notes** did); a separate `flow:github.checkout` command (an extra round trip, and the card could not hide Review before the click).
+**Accepted trade-off:** a review waits while that repo's chat is busy, and a user who types the exact review message into that chat gets the same spinner. In Plan mode the agent cannot save the file, so the card shows no link and the pane says so.
+**Still open:** none. Q-8 is answered: the prompt names `~/.cursor/skills/pr-review/SKILL.md` (D-11).
+
 ## Open questions
 
 | ID | Question | Answer | Owner |
@@ -123,6 +131,7 @@ Two optional sections, each behind its own token, both classic personal access t
 | Q-5 | Does `Agent.resume(agentId, options)` re-read the project's rules and skills? | **Answered (2026-11-05):** the reply kept the old rule ending after the file changed. Recreate the agent after an edit | none |
 | Q-6 | Does the SDK take the key as an option, or only from the environment? | **Answered (1.2.0 typings):** explicit `apiKey` option, always passed | none |
 | Q-7 | How does Mango sign in to Jira if localhost OAuth callbacks are rejected? | **Answered (Valentin, 2026-11-06):** an API token, email, and one site address. See D-16 | none |
+| Q-8 | Does the SDK agent load the user-level `pr-review` skill from `~/.cursor/skills/pr-review/`, so `review pr <url>` writes `pr-reviews/<n>.md`? | **Answered (2026-11-06):** a review of public-link-front #68 got `review pr <url>` and did not open the skill or write `pr-reviews/68.md`. Each send now names `~/.cursor/skills/pr-review/SKILL.md`. See D-11 | none |
 
 ## Phase 0 spike checklist
 

@@ -197,6 +197,8 @@ async function run<C extends CommandChannel>(
     case "flow:github.openReview":
       await github.openReview(input as InputOf<"flow:github.openReview">);
       return {} as OutputOf<C>;
+    case "flow:github.reviewReady":
+      return github.reviewReady(input as InputOf<"flow:github.reviewReady">) as OutputOf<C>;
     case "flow:github.openTokenPage":
       await github.openTokenPage(input as InputOf<"flow:github.openTokenPage">);
       return {} as OutputOf<C>;

@@ -24,7 +24,7 @@ import {
   type GithubItemKind,
   type GithubTokenKind,
 } from "../shared/github.js";
-import { isSavedReviewPath } from "./pr-review-file.js";
+import { isSavedReviewPath, readReviewVerdict } from "./pr-review-file.js";
 import { writeAtomic } from "./atomic-write.js";
 import type {
   ErrorCode,
@@ -253,6 +253,11 @@ export type GithubService = {
   open(input: { repo: string; kind: GithubItemKind; number: number }): Promise<void>;
   /** Opens pr-reviews/<number>.md for a picked repo when that file is in the local checkout. */
   openReview(input: { repo: string; number: number }): Promise<void>;
+  /** True when pr-reviews/<number>.md is a saved review in the local checkout. Reads the disk only, never GitHub. */
+  reviewReady(input: { repo: string; number: number }): {
+    ready: boolean;
+    verdict: "yes" | "no" | null;
+  };
   openTokenPage(input: { kind: GithubTokenKind }): Promise<void>;
 };
 
@@ -262,6 +267,8 @@ export type GithubOptions = {
   openExternal(url: string): Promise<void>;
   /** Absolute path of pr-reviews/<number>.md in the local checkout, or null when there is none. */
   reviewFile?(repo: string, number: number): string | null;
+  /** The workspace repo name whose origin is `repo`, or null when the workspace has no such checkout. */
+  localRepoName?(repo: string): string | null;
   /** Opens a path that reviewFile returned. */
   openPath?(file: string): Promise<void>;
   fetch?: typeof globalThis.fetch;
@@ -283,7 +290,7 @@ export function parseRepoRows(rows: readonly unknown[]): GithubRepo[] {
 }
 
 /** `null` when the answer is not the expected shape, `"missing"` when the repo is not visible to the token. */
-export function parsePrsResponse(data: unknown): GithubPrsResult | "missing" | null {
+export function parsePrsResponse(data: unknown): Omit<GithubPrsResult, "checkout"> | "missing" | null {
   const parsed = PrsDataSchema.safeParse(data);
   if (!parsed.success) return null;
   const repository = parsed.data.repository;
@@ -305,6 +312,7 @@ export function parsePrsResponse(data: unknown): GithubPrsResult | "missing" | n
       approvedByYou: row.viewerLatestReview?.state === "APPROVED",
       ci: ciState(row.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state),
       hasReview: false,
+      verdict: null,
     });
   }
   return { prs, total: repository.pullRequests.totalCount };
@@ -604,10 +612,12 @@ export function createGithubService(options: GithubOptions): GithubService {
     }
     return {
       total: page.total,
-      prs: page.prs.map((pr) => ({
-        ...pr,
-        hasReview: savedReview(options.reviewFile?.(input.repo, pr.number) ?? null, pr.number),
-      })),
+      checkout: options.localRepoName?.(input.repo) ?? null,
+      prs: page.prs.map((pr) => {
+        const file = options.reviewFile?.(input.repo, pr.number) ?? null;
+        const mark = reviewMark(file, pr.number);
+        return { ...pr, hasReview: mark.hasReview, verdict: mark.verdict };
+      }),
     };
   }
 
@@ -709,6 +719,25 @@ export function createGithubService(options: GithubOptions): GithubService {
     }
   }
 
+  function reviewReady(input: { repo: string; number: number }): {
+    ready: boolean;
+    verdict: "yes" | "no" | null;
+  } {
+    if (
+      !isRepoFullName(input.repo) ||
+      !load().selectedRepos.includes(input.repo)
+    ) {
+      throw new GithubError(
+        "invalid_input",
+        "Pick that repository in Setup first.",
+        false,
+      );
+    }
+    const file = options.reviewFile?.(input.repo, input.number) ?? null;
+    const mark = reviewMark(file, input.number);
+    return { ready: mark.ready, verdict: mark.verdict };
+  }
+
   async function openTokenPage(input: { kind: GithubTokenKind }): Promise<void> {
     const url = Object.hasOwn(TOKEN_PAGES, input.kind) ? TOKEN_PAGES[input.kind] : undefined;
     if (url === undefined) {
@@ -739,12 +768,26 @@ export function createGithubService(options: GithubOptions): GithubService {
     projectItems,
     open,
     openReview,
+    reviewReady,
     openTokenPage,
   };
 }
 
 function savedReview(file: string | null, number: number): boolean {
   return file !== null && isSavedReviewPath(file, number);
+}
+
+/** `ready` when the path is a saved review. `verdict` is the Yes or No at the top of that file. */
+function reviewMark(
+  file: string | null,
+  number: number,
+): { hasReview: boolean; ready: boolean; verdict: "yes" | "no" | null } {
+  const ready = savedReview(file, number);
+  return {
+    hasReview: ready,
+    ready,
+    verdict: ready && file !== null ? readReviewVerdict(file) : null,
+  };
 }
 
 /** The `Link` next page, but only when it is on api.github.com. */
