@@ -7,23 +7,37 @@ import {
   type Answers,
   type ChatStateName,
   type FlowEvent,
+  type GithubProjectRef,
+  type GithubStatus,
   type JiraStatus,
   type Result,
   type Settings,
   type Theme,
 } from "../shared/ipc.js";
+import { projectsReady, prsReady, type GithubTokenKind } from "../shared/github.js";
 import { parseMention } from "../shared/mention.js";
 import { Chat } from "./Chat.js";
 import { assignChatFruits, loadFruitMemory, saveFruitMemory, type ChatFruit } from "./fruits.js";
+import type { GitHubSetupProps } from "./GitHubSetup.js";
+import { GitHubPrs } from "./GitHubPrs.js";
+import { GitHubProjects } from "./GitHubProjects.js";
 import { Instructions } from "./Instructions.js";
 import type { JiraSetupProps } from "./JiraSetup.js";
 import { JiraTickets } from "./JiraTickets.js";
 import { NewChat } from "./NewChat.js";
 import { RepoSidebar } from "./RepoSidebar.js";
 import { Setup } from "./Setup.js";
-import { anyBusy, bannerFor, busyRepoNames, canRetry, emptySlice, initialState, isBusyState, reducer, screenOf, shouldLeaveAfterReset, sidebarRows, type Banner } from "./state.js";
+import { anyBusy, bannerFor, busyRepoNames, canRetry, emptySlice, initialState, isBusyState, reducer, screenOf, shouldLeaveAfterReset, sidebarRows, type Banner, type PaneKey } from "./state.js";
 
 type HeldEvents = { hold: boolean; events: FlowEvent[] };
+
+const BACK_LABEL: Record<PaneKey, string> = {
+  jiraOpen: "Back to tickets",
+  githubPrsOpen: "Back to pull requests",
+  githubProjectsOpen: "Back to projects",
+};
+
+const PANE_KEYS: readonly PaneKey[] = ["jiraOpen", "githubPrsOpen", "githubProjectsOpen"];
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -31,6 +45,8 @@ export function App() {
   const [modelEpoch, setModelEpoch] = useState(0);
   const [jira, setJira] = useState<JiraStatus | null>(null);
   const [jiraMessage, setJiraMessage] = useState<string | null>(null);
+  const [github, setGithub] = useState<GithubStatus | null>(null);
+  const [githubMessage, setGithubMessage] = useState<string | null>(null);
   const bootHold = useRef<HeldEvents>({ hold: true, events: [] });
   const holds = useRef<Map<string, HeldEvents>>(new Map());
   const loadTokens = useRef<Map<string, number>>(new Map());
@@ -47,9 +63,9 @@ export function App() {
   useEffect(() => {
     saveFruitMemory(assignedFruits.memory);
   }, [assignedFruits]);
-  // Jira covers chat, New chat, or Rules. The model list follows that screen, so opening Jira does not refetch.
+  // Jira and the GitHub panes cover chat, New chat, or Rules. The model list follows that screen, so opening one does not refetch.
   const modelsScreen =
-    screen === "jira"
+    screen === "jira" || screen === "githubPrs" || screen === "githubProjects"
       ? state.instructionsOpen && state.view.kind === "repo"
         ? "instructions"
         : state.view.kind === "home"
@@ -73,6 +89,25 @@ export function App() {
       }
       setJiraMessage(result.error.message);
       setJira({ email: null, site: null, tokenSet: false });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.flow.invoke("flow:github.status", {}).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setGithub(result.value);
+        return;
+      }
+      setGithubMessage(result.error.message);
+      setGithub({
+        repos: { tokenSet: false, login: null, selected: [] },
+        projects: { tokenSet: false, login: null, selected: [] },
+      });
     });
     return () => {
       cancelled = true;
@@ -421,6 +456,17 @@ export function App() {
     return true;
   }
 
+  async function githubUpdate(run: () => Promise<Result<GithubStatus>>): Promise<boolean> {
+    setGithubMessage(null);
+    const result = await run();
+    if (!result.ok) {
+      setGithubMessage(result.error.message);
+      return false;
+    }
+    setGithub(result.value);
+    return true;
+  }
+
   async function pickFolder(): Promise<void> {
     bootHold.current.hold = true;
     setPending(true);
@@ -548,6 +594,8 @@ export function App() {
         onSetup={() => dispatch({ type: "edit-setup" })}
         onInstructions={() => dispatch({ type: "open-instructions" })}
         onJira={hasSidebar ? null : () => dispatch({ type: "open-jira" })}
+        onGithubPrs={hasSidebar || !prsReady(github) ? null : () => dispatch({ type: "open-github-prs" })}
+        onGithubProjects={hasSidebar || !projectsReady(github) ? null : () => dispatch({ type: "open-github-projects" })}
         onDismiss={() => dispatch({ type: "dismiss-banner", repo: repoName })}
         onRetry={() => retryFor(repoName)}
         onBannerSetup={() => dispatch({ type: "edit-setup" })}
@@ -598,6 +646,26 @@ export function App() {
       jiraUpdate(() => window.flow.invoke("flow:jira.save", input)),
     onClear: () => jiraUpdate(() => window.flow.invoke("flow:jira.clear", {})),
   };
+  const githubSetup: GitHubSetupProps = {
+    status: github,
+    message: githubMessage,
+    onSaveToken: (kind: GithubTokenKind, token: string) =>
+      githubUpdate(() =>
+        kind === "repos"
+          ? window.flow.invoke("flow:github.saveRepoToken", { token })
+          : window.flow.invoke("flow:github.saveProjectToken", { token }),
+      ),
+    onClearToken: (kind: GithubTokenKind) =>
+      githubUpdate(() =>
+        kind === "repos"
+          ? window.flow.invoke("flow:github.clearRepoToken", {})
+          : window.flow.invoke("flow:github.clearProjectToken", {}),
+      ),
+    onSelectRepos: (repos: string[]) =>
+      githubUpdate(() => window.flow.invoke("flow:github.selectRepos", { repos })),
+    onSelectProjects: (projects: GithubProjectRef[]) =>
+      githubUpdate(() => window.flow.invoke("flow:github.selectProjects", { projects })),
+  };
   const jiraPane = (
     <JiraTickets
       status={jira}
@@ -606,6 +674,34 @@ export function App() {
       onImplement={(text) => dispatch({ type: "implement-ticket", text })}
     />
   );
+  const githubPrsPane = (
+    <GitHubPrs
+      status={github}
+      onBack={() => dispatch({ type: "close-github-prs" })}
+      onSetup={() => dispatch({ type: "edit-setup" })}
+    />
+  );
+  const githubProjectsPane = (
+    <GitHubProjects
+      status={github}
+      onBack={() => dispatch({ type: "close-github-projects" })}
+      onSetup={() => dispatch({ type: "edit-setup" })}
+      onImplement={(text) => dispatch({ type: "implement-ticket", text })}
+    />
+  );
+  const openPane = PANE_KEYS.find((key) => state[key]);
+  const sidePane = (() => {
+    switch (screen) {
+      case "jira":
+        return jiraPane;
+      case "githubPrs":
+        return githubPrsPane;
+      case "githubProjects":
+        return githubProjectsPane;
+      default:
+        return null;
+    }
+  })();
 
   return (
     <div className="app">
@@ -640,12 +736,14 @@ export function App() {
               settings.setupComplete
                 ? () => {
                     setJiraMessage(null);
+                    setGithubMessage(null);
                     dispatch({ type: "close-setup" });
                   }
                 : null
             }
-            backLabel={state.jiraOpen ? "Back to tickets" : "Back to chat"}
+            backLabel={openPane === undefined ? "Back to chat" : BACK_LABEL[openPane]}
             jira={jiraSetup}
+            github={githubSetup}
           />
         </>
       ) : hasSidebar ? (
@@ -655,13 +753,19 @@ export function App() {
             fruits={assignedFruits.fruits}
             pending={pending}
             jiraActive={state.jiraOpen}
+            githubPrs={prsReady(github)}
+            githubProjects={projectsReady(github)}
+            prsActive={state.githubPrsOpen}
+            projectsActive={state.githubProjectsOpen}
             onOpen={(name) => void openChat(name)}
             onNew={() => dispatch({ type: "open-home" })}
             onJira={() => dispatch({ type: "open-jira" })}
+            onGithubPrs={() => dispatch({ type: "open-github-prs" })}
+            onGithubProjects={() => dispatch({ type: "open-github-projects" })}
             onRemove={(name) => void resetChat(name)}
           />
-          {screen === "jira"
-            ? jiraPane
+          {sidePane !== null
+            ? sidePane
             : screen === "home"
               ? home
               : screen === "instructions" && repo !== null
@@ -670,8 +774,8 @@ export function App() {
                   ? chatPane(repo, settings)
                   : null}
         </div>
-      ) : screen === "jira" ? (
-        jiraPane
+      ) : sidePane !== null ? (
+        sidePane
       ) : screen === "instructions" && repo !== null ? (
         instructionsPane(repo)
       ) : repo !== null ? (

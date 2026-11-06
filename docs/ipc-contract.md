@@ -28,8 +28,8 @@ type ErrorCode =
 - The `flow:chat.state` command omits `runId` when no run is active. While a run is active, that command and the events use that run's id. A `chat.state` event uses `runId` `"session"` when nothing is running.
 - The renderer applies every `chat.state` event. It ignores any other event for a run that `chat.done` or `chat.error` already sealed, and any event whose `runId` differs from the run that is currently active.
 - Commands that touch a chat, a question, rules, skills, or `AGENTS.md` take `repo`. `repo` is `.` when the workspace folder is the only repo, otherwise a direct child directory name. Main resolves it against the scanned repo list. An unknown name returns `not_found`. No command returns a repo path.
-- No command returns the API key, the `agentId`, the Jira API token, or a path outside the chosen folder. `flow:jira.status` and `flow:jira.save` return the email, the site origin, and `tokenSet`.
-- A Jira failure uses the same `ErrorCode` values. The window shows it inside the Jira pane or Setup, not in the Cursor key banner.
+- No command returns the API key, the `agentId`, the Jira API token, a GitHub token, or a path outside the chosen folder. `flow:jira.status` and `flow:jira.save` return the email, the site origin, and `tokenSet`. Every `flow:github.*` status carries `tokenSet`, the login, and the picks for each token, never the token.
+- A Jira or GitHub failure uses the same `ErrorCode` values. The window shows it inside that pane or Setup, not in the Cursor key banner.
 
 ## Commands
 
@@ -64,6 +64,19 @@ type ErrorCode =
 | `flow:jira.clear` | none | status | Writes an empty record over `jira.bin`. Email, site, and token are gone |
 | `flow:jira.issues` | `{ pageToken? }` | `{ issues: { key, summary, status, type, project, updated }[], nextPageToken? }` | Issues assigned to the account whose status category is not Done, newest update first, 50 per page. `pageToken` is Jira's opaque `nextPageToken`, sent back only to turn the page. `not_ready` when email, site, or token is missing. `auth` on HTTP 401 or 403, and the saved token is kept. `not_found` on HTTP 404 |
 | `flow:jira.open` | `{ key }` | `{}` | `key` must match `^[A-Z][A-Z0-9_]{1,49}-[0-9]{1,9}$`. Main opens `https://<site>.atlassian.net/browse/<key>` in the system browser. The window cannot pass a URL |
+| `flow:github.status` | none | `{ repos: { tokenSet, login, selected }, projects: { tokenSet, login, selected } }` | `selected` for repos is `string[]` of `owner/name`. For projects it is `{ id, title }[]`. `login` is null until the token is saved. A token is never returned |
+| `flow:github.saveRepoToken` | `{ token }` | status | `token` is trimmed, then 1 to 500 characters. Main checks it with `GET /user` first. `auth` on HTTP 401, or on 403 that is not a rate limit, and nothing is saved. `io_error` when this Mac cannot encrypt. Keeps the picked repos |
+| `flow:github.clearRepoToken` | none | status | Removes the repos token, its login, and the picked repos |
+| `flow:github.saveProjectToken` | `{ token }` | status | Same input as `saveRepoToken`. Main checks it with a GraphQL `viewer { login }` query |
+| `flow:github.clearProjectToken` | none | status | Removes the Projects token, its login, and the picked projects |
+| `flow:github.repos` | none | `{ repos: { fullName, private, archived }[], truncated }` | `GET /user/repos`, 100 per page, at most 10 pages, `Link` followed only on `api.github.com`. `truncated` is true when more pages remain. `not_ready` without the repos token |
+| `flow:github.selectRepos` | `{ repos }` | status | `repos` is at most 30 names matching `^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$`, with the name part not `.` or `..`. Duplicates are dropped. `not_ready` without the repos token |
+| `flow:github.prs` | `{ repo }` | `{ prs: { number, title, author, headRefName, baseRefName, isDraft, updatedAt, review, ci }[], total }` | One GraphQL call: the 50 most recently updated open pull requests of a picked repo. `review` is `approved`, `changes`, `required`, or null. `ci` is `passing`, `failing`, `pending`, or null. `invalid_input` for a repo that is not picked. `not_found` when the token cannot see the repo. `auth` for a rejected token or a missing scope |
+| `flow:github.projects` | none | `{ projects: { id, title }[] }` | The open personal projects of the signed-in user (`viewer.projectsV2`, first 50). `not_ready` without the Projects token |
+| `flow:github.selectProjects` | `{ projects }` | status | At most 10 `{ id, title }`. `id` must match `^PVT_[A-Za-z0-9_-]+$`. `not_ready` without the Projects token |
+| `flow:github.projectItems` | `{ projectId, cursor? }` | `{ items: { id, kind, repo, number, title, status }[], nextCursor? }` | Items of a picked project. Closed or merged issues and pull requests, and items whose Status is done, closed, completed, or shipped, are dropped. Drafts are kept (`kind` `draft`, `repo` and `number` null). Main reads up to 4 pages of 50, until 25 items are kept. `cursor` is GitHub's opaque `endCursor`, sent back only to turn the page. `invalid_input` for a project that is not picked. `not_found` when GitHub has no such project for the token |
+| `flow:github.open` | `{ repo, kind, number }` | `{}` | `kind` is `pr` or `issue`. Main opens `https://github.com/<repo>/pull/<n>` or `/issues/<n>` in the system browser. `not_ready` when no GitHub token is saved. The window cannot pass a URL |
+| `flow:github.openTokenPage` | `{ kind }` | `{}` | `kind` is `repos` or `projects`. Main opens a fixed GitHub "new token" URL with the scope (`repo` or `read:project`) and a note filled in. Works before any token is saved. The window cannot pass a URL |
 
 `AGENTS.md` is not a rule or a skill. `flow:agentsmd.read` takes `{ repo }` and returns `{ body }`. `flow:agentsmd.write` takes `{ repo, body }` of at most 200 000 characters and returns `{ body }`. An empty body writes an empty file.
 

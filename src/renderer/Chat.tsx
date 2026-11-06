@@ -38,6 +38,10 @@ type ChatProps = {
   onInstructions: () => void;
   /** Null when the left menu already has the Jira button. */
   onJira: (() => void) | null;
+  /** Null when the left menu has the button, or the repos token is not saved. */
+  onGithubPrs: (() => void) | null;
+  /** Null when the left menu has the button, or the Projects token is not saved. */
+  onGithubProjects: (() => void) | null;
   onDismiss: () => void;
   onRetry: () => void;
   onBannerSetup: () => void;
@@ -107,6 +111,16 @@ export function Chat(props: ChatProps) {
           {props.onJira ? (
             <button type="button" className="btn" onClick={props.onJira}>
               Jira
+            </button>
+          ) : null}
+          {props.onGithubPrs ? (
+            <button type="button" className="btn" onClick={props.onGithubPrs}>
+              Pull requests
+            </button>
+          ) : null}
+          {props.onGithubProjects ? (
+            <button type="button" className="btn" onClick={props.onGithubProjects}>
+              Projects
             </button>
           ) : null}
           <button type="button" className="btn" onClick={props.onInstructions}>

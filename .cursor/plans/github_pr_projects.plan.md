@@ -117,23 +117,27 @@ sequenceDiagram
 - `src/renderer/JiraTickets.tsx`, `JiraSetup.tsx`: the board and the token pattern to copy. `styles.css` already has `.tickets-*`, `.ticket-*`.
 - `src/renderer/state.ts`: `jiraOpen`, `open-jira`, `close-jira`, `screenOf`, `sidebarRows`.
 - `scripts/jira-check.ts` and `scripts/repos-check-resolve.mjs`: the check pattern and loader.
+- ✅ `src/shared/github.ts`: name and id patterns, item URL, Link header, review and CI labels, done filter, board column, relative time. COMPLETED in Step 1
+- ✅ GitHub schemas and types in `src/shared/ipc.ts` (status, repos, pull requests, projects, project items). COMPLETED in Step 2
+- ✅ `src/main/github-service.ts`: two tokens, repo and project reads, browser opens, and error mapping. COMPLETED in Step 3
+- ✅ `flow:github.*` commands (13), `registerIpc` wiring, and `index.ts` wiring. COMPLETED in Step 4
+- ✅ `githubPrsOpen`, `githubProjectsOpen`, and their actions and screens in `state.ts`. COMPLETED in Step 5
+- ✅ `scripts/github-check.ts` pane checks and `npm run check:github`. COMPLETED in Step 5
+- ✅ `GitHubSetup.tsx` and its place in `Setup.tsx` and `App.tsx`. COMPLETED in Step 6
+- ✅ `GitHubPrs.tsx`: the pull requests pane. COMPLETED in Step 7
+- ✅ `GitHubProjects.tsx`: the projects pane. COMPLETED in Step 8
+- ✅ Panes, menu buttons, header buttons, and styles. COMPLETED in Step 9
+- ✅ Documentation. COMPLETED in Step 10
 
 **❌ Missing Components**
-- `src/shared/github.ts` (Step 1)
-- GitHub schemas and types in `src/shared/ipc.ts` (Step 2)
-- `src/main/github-service.ts` (Step 3)
-- `flow:github.*` commands, `registerIpc` wiring, `index.ts` wiring (Step 4)
-- `githubPrsOpen`, `githubProjectsOpen`, and their actions and screens in `state.ts` (Step 5)
-- `GitHubSetup.tsx` and its place in `Setup.tsx` and `App.tsx` (Step 6)
-- `GitHubPrs.tsx` (Step 7)
-- `GitHubProjects.tsx` (Step 8)
-- Panes, menu buttons, header buttons, and styles (Step 9)
-- `scripts/github-check.ts` and `npm run check:github` (Steps 1 to 5)
-- Documentation (Step 10)
+- None.
 
 ## Implementation Steps
 
-### Step 1: Shared GitHub helpers and the check script
+### ✅ Step 1: Shared GitHub helpers and the check script
+
+Landed: `src/shared/github.ts`, `scripts/github-check.ts` (helper checks only), and `check:github` in `package.json`. Later steps extend the check script.
+
 - **Files:** `src/shared/github.ts`, `scripts/github-check.ts`, `package.json`
 - **Change:** Pure helpers used by main, the window, and the check script: name and id patterns, the item URL, the `Link` header, labels, the done filter, the board column, and a relative time. The check script is created here and extended in later steps.
 
@@ -416,7 +420,10 @@ After
 
 **Verify:** `npm run typecheck && npm run check:github`.
 
-### Step 2: Contracts (schemas and types) in `src/shared/ipc.ts`
+### ✅ Step 2: Contracts (schemas and types) in `src/shared/ipc.ts`
+
+Landed: GitHub Zod schemas and inferred types in `src/shared/ipc.ts`. `COMMANDS` entries stay for Step 4.
+
 - **Files:** `src/shared/ipc.ts`
 - **Change:** Add the Zod schemas and inferred types for the GitHub status, repo list, pull requests, projects, and project items. The `COMMANDS` entries are added in Step 4 together with their handlers, because `registerIpc` ends in `assertNever` and would stop type-checking if a command had no `case`.
 
@@ -525,7 +532,10 @@ export type GithubItemsResult = z.infer<typeof GithubItemsResultSchema>;
 
 **Verify:** `npm run typecheck`. The schemas are exported but not yet used, which does not trip `noUnusedLocals`.
 
-### Step 3: `src/main/github-service.ts` and its service checks
+### ✅ Step 3: `src/main/github-service.ts` and its service checks
+
+Landed: `src/main/github-service.ts` and the service checks appended to `scripts/github-check.ts`.
+
 - **Files:** `src/main/github-service.ts`, `scripts/github-check.ts`
 - **Change:** The main-process service: two `safeStorage` tokens, the picked repos and projects, REST repo list, GraphQL pull requests, projects and items, the browser opens, and the error mapping. It copies the shape of `jira-service.ts`. Every request goes to `https://api.github.com` only.
 
@@ -1993,7 +2003,10 @@ test("a bad github.bin reads as empty, and save fails when encryption is off", a
 
 **Verify:** `npm run typecheck && npm run check:github`.
 
-### Step 4: IPC commands, `registerIpc`, and `index.ts` wiring
+### ✅ Step 4: IPC commands, `registerIpc`, and `index.ts` wiring
+
+Landed: 13 `flow:github.*` commands in `src/shared/ipc.ts`, handlers and the `GithubError` catch in `src/main/ipc.ts`, service creation in `src/main/index.ts`, and the IPC checks appended to `scripts/github-check.ts`.
+
 - **Files:** `src/shared/ipc.ts`, `src/main/ipc.ts`, `src/main/index.ts`, `scripts/github-check.ts`
 - **Change:** Declare the 13 `flow:github.*` commands, handle them in `registerIpc`, add the `GithubError` catch, and create the service in the composition root. The preload needs no change: it is generic over `COMMANDS`.
 
@@ -2277,7 +2290,10 @@ test("the GitHub commands refuse input the window should never send", () => {
 
 **Verify:** `npm run typecheck && npm run check:github`. `assertNever` in `run` now covers every channel.
 
-### Step 5: Pane state in the reducer
+### ✅ Step 5: Pane state in the reducer
+
+Landed: `githubPrsOpen` and `githubProjectsOpen` in `src/renderer/state.ts` (`paneOpen`, `closePane`, screens, and actions), and the pane checks appended to `scripts/github-check.ts`.
+
 - **Files:** `src/renderer/state.ts`, `scripts/github-check.ts`
 - **Change:** Add `githubPrsOpen` and `githubProjectsOpen`, mutually exclusive with each other and with `jiraOpen`. Opening one clears the others; `open-home`, `implement-ticket`, and `open-repo` clear all three; `screenOf` gets `"githubPrs"` and `"githubProjects"`. Two helpers (`paneOpen`, `closePane`) replace the repeated "jira is open" tests.
 
@@ -2628,7 +2644,10 @@ test("while any pane is open no repo row is selected, and a reply under it is un
 
 **Verify:** `npm run typecheck && npm run check:github && npm run check:jira && npm run check:sidebar`. The existing Jira and sidebar checks must still pass unchanged.
 
-### Step 6: GitHub block in Setup
+### ✅ Step 6: GitHub block in Setup
+
+Landed: `src/renderer/GitHubSetup.tsx`, rendered under Jira in `Setup.tsx`, with GitHub status and the setup handlers in `App.tsx`.
+
 - **Files:** `src/renderer/GitHubSetup.tsx`, `src/renderer/Setup.tsx`, `src/renderer/App.tsx`
 - **Change:** Two token fields (each with **Get token**, Save, Replace, Remove, "Token saved", "Signed in as") and two pickers (a searchable repo list, a project list). `App` keeps the GitHub status, passes the setup props, and `Setup` renders the block below `JiraSetup`. The panes come in Steps 7 to 9.
 
@@ -3252,7 +3271,10 @@ After
 
 **Verify:** `npm run typecheck`. Manual: `npm start`, open Setup, see the GitHub block below Jira.
 
-### Step 7: Pull requests pane
+### ✅ Step 7: Pull requests pane
+
+Landed: `src/renderer/GitHubPrs.tsx`, a tabbed pull-request list that loads and caches each picked repo.
+
 - **Files:** `src/renderer/GitHubPrs.tsx`
 - **Change:** A pane modeled on `JiraTickets.tsx`: Back, Refresh, Setup, a `role="tablist"` row (one tab per picked repo, PR count once loaded), and one list per tab, loaded on activation and cached per repo.
 
@@ -3463,7 +3485,10 @@ export function GitHubPrs({ status, onBack, onSetup }: GitHubPrsProps) {
 
 **Verify:** `npm run typecheck`. The pane is not mounted yet (Step 9).
 
-### Step 8: Projects pane (a copy of the Jira board)
+### ✅ Step 8: Projects pane (a copy of the Jira board)
+
+Landed: `src/renderer/GitHubProjects.tsx`, a three-column board of open project items with Implement and Load more.
+
 - **Files:** `src/renderer/GitHubProjects.tsx`
 - **Change:** `JiraTickets.tsx` with the data swapped: same header, same three columns, same card, same Implement button, same Load more, same error and retry states. A project switcher appears in the header only when more than one project is picked.
 
@@ -3740,7 +3765,10 @@ export function GitHubProjects({ status, onBack, onSetup, onImplement }: GitHubP
 
 **Verify:** `npm run typecheck`. The pane is not mounted yet (Step 9).
 
-### Step 9: Wire the panes, menu buttons, header buttons, and styles
+### ✅ Step 9: Wire the panes, menu buttons, header buttons, and styles
+
+Landed: both panes mount from `App.tsx`, Pull requests and Projects buttons show in the left menu and the chat header only while that token is saved, and `styles.css` has the tab, row, chip, and picker rules. `prsReady` and `projectsReady` share the existing `GithubTokenKind` import. `scripts/github-check.ts` binds the ready-token fixtures to locals so those assertions typecheck; the assertions are unchanged.
+
 - **Files:** `src/renderer/App.tsx`, `src/renderer/RepoSidebar.tsx`, `src/renderer/Chat.tsx`, `src/renderer/styles.css`
 - **Change:** Mount both panes next to the Jira pane, add the Pull requests and Projects buttons (each shown only while its token is saved), and add the styles for tabs, PR rows, chips, and pickers. The Projects board reuses the `ticket-*` classes as they are.
 
@@ -4094,7 +4122,9 @@ After
 
 **Verify:** `npm run typecheck`, then every check script (see Testing Checklist), then `npm start` and walk through the manual checks.
 
-### Step 10: Update Documentation (always the last step)
+### ✅ Step 10: Update Documentation (always the last step)
+
+Landed: README, docs/README, architecture, the IPC contract, and D-17 in decisions. `docs/session-and-questions.md` is unchanged.
 
 See "Documentation Update" below.
 
@@ -4124,11 +4154,11 @@ See "Documentation Update" below.
 
 ## Testing Checklist
 
-- [ ] `npm run typecheck` passes
-- [ ] `npm run check:github` passes
-- [ ] `npm run check:jira` and `npm run check:sidebar` still pass (the reducer was refactored)
-- [ ] The other checks still pass: `check:questions`, `check:mentions`, `check:repos`, `check:fruits`, `check:plan`, `check:segments`, `check:tools`
-- [ ] No token text appears in any status, in `github.bin` on disk, or in an error message (covered by `check:github`)
+- [x] `npm run typecheck` passes
+- [x] `npm run check:github` passes
+- [x] `npm run check:jira` and `npm run check:sidebar` still pass (the reducer was refactored)
+- [x] The other checks still pass: `check:questions`, `check:mentions`, `check:repos`, `check:fruits`, `check:plan`, `check:segments`, `check:tools`
+- [x] No token text appears in any status, in `github.bin` on disk, or in an error message (covered by `check:github`)
 - [ ] Manual, with real tokens: Get token opens GitHub's new-token page with the scope and note filled in
 - [ ] Manual: a wrong token shows an error and is not saved; the right token shows "Token saved" and "Signed in as <login>"
 - [ ] Manual: with no token the menu (or header) has no Pull requests or Projects button; with only one token only that button shows
@@ -4140,27 +4170,27 @@ See "Documentation Update" below.
 - [ ] Manual: Remove on a token hides its button and clears its picks
 
 ## Files to Modify
-- [ ] `src/shared/github.ts` (new)
-- [ ] `src/shared/ipc.ts`
-- [ ] `src/main/github-service.ts` (new)
-- [ ] `src/main/ipc.ts`
-- [ ] `src/main/index.ts`
-- [ ] `src/renderer/state.ts`
-- [ ] `src/renderer/GitHubSetup.tsx` (new)
-- [ ] `src/renderer/GitHubPrs.tsx` (new)
-- [ ] `src/renderer/GitHubProjects.tsx` (new)
-- [ ] `src/renderer/Setup.tsx`
-- [ ] `src/renderer/App.tsx`
-- [ ] `src/renderer/RepoSidebar.tsx`
-- [ ] `src/renderer/Chat.tsx`
-- [ ] `src/renderer/styles.css`
-- [ ] `scripts/github-check.ts` (new)
-- [ ] `package.json`
-- [ ] `README.md`
-- [ ] `docs/README.md`
-- [ ] `docs/architecture.md`
-- [ ] `docs/ipc-contract.md`
-- [ ] `docs/decisions.md`
+- ✅ `src/shared/github.ts` (new)
+- ✅ `src/shared/ipc.ts` (schemas in Step 2; `COMMANDS` in Step 4)
+- ✅ `src/main/github-service.ts` (new)
+- ✅ `src/main/ipc.ts`
+- ✅ `src/main/index.ts`
+- ✅ `src/renderer/state.ts`
+- ✅ `src/renderer/GitHubSetup.tsx` (new)
+- ✅ `src/renderer/GitHubPrs.tsx` (new)
+- ✅ `src/renderer/GitHubProjects.tsx` (new)
+- ✅ `src/renderer/Setup.tsx`
+- ✅ `src/renderer/App.tsx` (GitHub status and Setup props in Step 6; pane wiring in Step 9)
+- ✅ `src/renderer/RepoSidebar.tsx`
+- ✅ `src/renderer/Chat.tsx`
+- ✅ `src/renderer/styles.css`
+- ✅ `scripts/github-check.ts` (new in Step 1; service checks in Step 3; IPC checks in Step 4; pane checks in Step 5)
+- ✅ `package.json`
+- ✅ `README.md`
+- ✅ `docs/README.md`
+- ✅ `docs/architecture.md`
+- ✅ `docs/ipc-contract.md`
+- ✅ `docs/decisions.md`
 
 ## Implementation Order
 1. Step 1: shared helpers and the check script
@@ -4176,17 +4206,19 @@ See "Documentation Update" below.
 
 ## Documentation Update
 
-### Step 10: Update Documentation (always the last step)
+### ✅ Step 10: Update Documentation (always the last step)
+
+Landed: README, docs/README, architecture, the IPC contract, and D-17 in decisions. `docs/session-and-questions.md` is unchanged.
 
 **Affected documents**
 
 | Document | What changes | Status |
 |----------|--------------|--------|
-| `README.md` | Describe the two optional GitHub sections, the tokens and their scopes, `npm run check:github` | todo |
-| `docs/README.md` | Status paragraph: mention the GitHub sections and `check:github` | todo |
-| `docs/architecture.md` | Context diagram, module diagram, module table, `atomic-write` users, data ownership, security bullet, renderer screens, folder layout, out of scope | todo |
-| `docs/ipc-contract.md` | The "no command returns a token" bullet, the failure bullet, and 13 rows in the command table | todo |
-| `docs/decisions.md` | New D-17 | todo |
+| `README.md` | Describe the two optional GitHub sections, the tokens and their scopes, `npm run check:github` | done |
+| `docs/README.md` | Status paragraph: mention the GitHub sections and `check:github` | done |
+| `docs/architecture.md` | Context diagram, module diagram, module table, `atomic-write` users, data ownership, security bullet, renderer screens, folder layout, out of scope | done |
+| `docs/ipc-contract.md` | The "no command returns a token" bullet, the failure bullet, and 13 rows in the command table | done |
+| `docs/decisions.md` | New D-17 | done |
 | `docs/session-and-questions.md` | no change, because the chat state machine and the question flow are untouched; the panes use `view` and `*Open` flags only | n/a |
 
 **Edits**
@@ -4412,3 +4444,5 @@ Two optional sections, each behind its own token, both classic personal access t
 - Open question: add Octokit later for retry and throttling? Mango ADR-0008 names it; flowFE has no dependency for it. (owner: Valentin)
 - Open question: should the Projects board get an "assigned to me" filter, and should org-owned projects be supported? (owner: Valentin)
 - Open question: the high-level plan asked for assignees and labels on project items. They are not requested because no card shows them. Add them when a card needs them. (owner: Valentin)
+
+Review fixes: `src/renderer/GitHubPrs.tsx`, `src/renderer/GitHubProjects.tsx`, `src/renderer/JiraTickets.tsx`, `src/renderer/GitHubSetup.tsx`, `src/renderer/App.tsx`, `src/shared/ipc.ts`, `src/main/github-service.ts`, `docs/ipc-contract.md`. `src/renderer/TicketBoard.tsx` is new. The selected-tab rule now uses aria-current.

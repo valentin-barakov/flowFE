@@ -857,3 +857,177 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
   font-size: 12px;
   user-select: all;
 }
+.gh-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.gh-section > label:first-child { margin-top: 0; }
+.gh-picker { margin-top: 12px; }
+.gh-filter { width: 100%; }
+.gh-combo { position: relative; }
+.gh-combo .gh-list-box {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  box-shadow: var(--shadow);
+}
+.gh-list-box {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.gh-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.gh-option:hover { background: var(--soft); }
+.gh-option input { flex: none; }
+.gh-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gh-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.gh-picks li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 4px 2px 8px;
+  font-size: 12px;
+}
+.gh-picks li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gh-picks button {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+.gh-picks button:hover { background: var(--soft); color: var(--ink); }
+.gh-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+.gh-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--panel);
+  color: var(--ink);
+}
+.gh-tab[aria-current="true"] {
+  background: var(--soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.gh-count {
+  color: var(--muted);
+  font-size: 12px;
+}
+.gh-panel { padding-top: 12px; }
+.gh-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gh-pr {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.gh-pr-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.gh-review-link {
+  flex: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gh-pr:hover { border-color: var(--accent); }
+.gh-pr.approved-by-you,
+.gh-pr.approved-by-you:hover {
+  border-color: var(--ok);
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+.gh-pr-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gh-pr .ticket-meta { grid-column: auto; }
+.gh-review-approved,
+.gh-ci-passing {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
+}
+.gh-review-changes,
+.gh-ci-failing {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+.gh-review-required,
+.gh-ci-pending {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+}

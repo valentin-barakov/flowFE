@@ -5,6 +5,8 @@ import { existsSync, renameSync } from "node:fs";
 import path from "node:path";
 import { QuestionRejected, QUESTION_CANCELLED } from "../shared/questions.js";
 import { createAgentService } from "./agent-service.js";
+import { createGithubService } from "./github-service.js";
+import { existingReviewFile, localRepoPath } from "./pr-review-file.js";
 import { publish, registerIpc, type IpcHost } from "./ipc.js";
 import { createJiraService } from "./jira-service.js";
 import { createRulesSkills } from "./rules-skills-service.js";
@@ -57,6 +59,25 @@ function start(): void {
     // Only https://<site>.atlassian.net/browse/<KEY>, built in jira-service, reaches this function.
     openExternal: (url) => shell.openExternal(url),
   });
+  const github = createGithubService({
+    userDataDir: app.getPath("userData"),
+    secrets: safeStorage,
+    // Only https://github.com/settings/tokens/new?... (a fixed table) and
+    // https://github.com/<owner>/<repo>/(pull|issues)/<n>, both built in github-service, reach this function.
+    openExternal: (url) => shell.openExternal(url),
+    // reviewFile only returns <checkout>/pr-reviews/<number>.md. openPath receives that path.
+    reviewFile: (repo, number) => {
+      const current = store.view();
+      if (current.folder === null || current.folderMissing) return null;
+      const checkout = localRepoPath(repo, store.listRepos(current.folder));
+      if (checkout === null) return null;
+      return existingReviewFile(checkout, number);
+    },
+    openPath: async (file) => {
+      const error = await shell.openPath(file);
+      if (error !== "") throw new Error(error);
+    },
+  });
   const models = createAgentService({
     ask() {
       return Promise.reject(new QuestionRejected("cancelled", QUESTION_CANCELLED));
@@ -69,7 +90,7 @@ function start(): void {
     listModels: (key) => models.listModels(key),
     createAgents: (ask) => createAgentService({ ask }),
   });
-  registerIpc(host, manager, files, jira);
+  registerIpc(host, manager, files, jira, github);
   attach(createMainWindow(distDir));
   app.on("activate", () => {
     if (host.window === null) attach(createMainWindow(distDir));

@@ -6,9 +6,9 @@ import {
   jiraReady,
   siteLabel,
   ticketColumn,
-  TICKET_COLUMNS,
   type TicketColumn,
 } from "../shared/jira.js";
+import { TicketBoard } from "./TicketBoard.js";
 
 type Load =
   | { kind: "loading" }
@@ -146,85 +146,44 @@ export function JiraTickets({ status, onBack, onSetup, onImplement }: JiraTicket
       columns[ticketColumn(issue.status, issue.statusCategory)].push(issue);
     }
     return (
-      <>
-        <div className="ticket-board">
-          {TICKET_COLUMNS.map((column) => (
-            <section
-              key={column.id}
-              className="ticket-column"
-              aria-label={column.label}
-            >
-              <h3>
-                {column.label}
-                <span className="ticket-count">{columns[column.id].length}</span>
-              </h3>
-              {columns[column.id].length === 0 ? (
-                <p className="ticket-column-empty">None</p>
-              ) : (
-                <ul className="ticket-list">
-                  {columns[column.id].map((issue) => {
-                    const url =
-                      status?.site != null
-                        ? issueBrowseUrl(status.site, issue.key)
-                        : null;
-                    return (
-                      <li key={issue.key} className="ticket-card">
-                        <button
-                          type="button"
-                          className="ticket"
-                          title="Open in the browser"
-                          onClick={() => void openIssue(issue.key)}
-                        >
-                          <span className="ticket-key">{issue.key}</span>
-                          <span className="ticket-summary">{issue.summary}</span>
-                          <span className="ticket-meta">
-                            {issue.status !== "" ? (
-                              <span className="ticket-chip">{issue.status}</span>
-                            ) : null}
-                            {issue.type !== "" ? (
-                              <span className="ticket-chip">{issue.type}</span>
-                            ) : null}
-                            {issue.project !== "" ? (
-                              <span className="ticket-chip">{issue.project}</span>
-                            ) : null}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          disabled={url === null}
-                          title={
-                            url === null
-                              ? "Ticket link is not available"
-                              : "Open a new chat for this ticket"
-                          }
-                          onClick={() => {
-                            if (url !== null) onImplement(implementPrompt(url));
-                          }}
-                        >
-                          Implement
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
-          ))}
-        </div>
-        {load.next !== null ? (
-          <p className="actions">
-            <button
-              type="button"
-              className="btn"
-              disabled={loadingMore}
-              onClick={() => void loadMore(load.next ?? "")}
-            >
-              {loadingMore ? "Loading…" : "Load more"}
-            </button>
-          </p>
-        ) : null}
-      </>
+      <TicketBoard
+        columns={columns}
+        next={load.next}
+        loadingMore={loadingMore}
+        onLoadMore={(token) => void loadMore(token)}
+        renderCard={(issue) => {
+          const url = status?.site != null ? issueBrowseUrl(status.site, issue.key) : null;
+          return (
+            <li key={issue.key} className="ticket-card">
+              <button
+                type="button"
+                className="ticket"
+                title="Open in the browser"
+                onClick={() => void openIssue(issue.key)}
+              >
+                <span className="ticket-key">{issue.key}</span>
+                <span className="ticket-summary">{issue.summary}</span>
+                <span className="ticket-meta">
+                  {issue.status !== "" ? <span className="ticket-chip">{issue.status}</span> : null}
+                  {issue.type !== "" ? <span className="ticket-chip">{issue.type}</span> : null}
+                  {issue.project !== "" ? <span className="ticket-chip">{issue.project}</span> : null}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={url === null}
+                title={url === null ? "Ticket link is not available" : "Open a new chat for this ticket"}
+                onClick={() => {
+                  if (url !== null) onImplement(implementPrompt(url));
+                }}
+              >
+                Implement
+              </button>
+            </li>
+          );
+        }}
+      />
     );
   }
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AgentMode, Settings, Theme } from "../shared/ipc.js";
 import { Bot } from "./Bot.js";
+import { GitHubSetup, type GitHubSetupProps } from "./GitHubSetup.js";
 import { JiraSetup, type JiraSetupProps } from "./JiraSetup.js";
 import type { ModelChoice } from "./state.js";
 
@@ -20,9 +21,10 @@ type SetupProps = {
   onBack: (() => void) | null;
   backLabel: string;
   jira: JiraSetupProps;
+  github: GitHubSetupProps;
 };
 
-export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onMode, onBack, backLabel, jira }: SetupProps) {
+export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onMode, onBack, backLabel, jira, github }: SetupProps) {
   const [replacing, setReplacing] = useState(false);
   const [key, setKey] = useState("");
   const showKeyField = !settings.keySet || replacing;
@@ -134,6 +136,8 @@ export function Setup({ settings, models, modelsError, pending, repos, locked, o
         </section>
 
         <JiraSetup {...jira} pending={pending} />
+
+        <GitHubSetup {...github} pending={pending} />
 
         {onBack ? (
           <p className="actions">

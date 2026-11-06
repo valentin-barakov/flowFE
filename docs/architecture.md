@@ -12,8 +12,9 @@ flowchart LR
     end
     Main -->|"@cursor/sdk local"| Agent["Cursor agent (runs on this Mac)"]
     Main <-->|"read/write, allowlisted"| Files["Folder: .cursor/rules, .cursor/skills, AGENTS.md"]
-    Main <--> UserData["userData: settings, chats, encrypted key, encrypted Jira token"]
+    Main <--> UserData["userData: settings, chats, encrypted key, encrypted Jira token, encrypted GitHub tokens"]
     Main -->|"Basic auth, assigned tickets"| Jira["Jira Cloud (one atlassian.net site)"]
+    Main -->|"Bearer token, read-only"| GitHub["api.github.com (pull requests, projects)"]
     Agent -->|"model calls"| Cursor["Cursor API (needs CURSOR_API_KEY)"]
     Agent -->|"shell, edit, read"| Folder["Chosen folder"]
 ```
@@ -22,7 +23,7 @@ flowchart LR
 
 ## Main-process modules
 
-Main is built in one place, `src/main/index.ts` (the composition root). Each module is a factory that receives what it needs as arguments. A module does not import `electron` or another module's concrete instance, except `index.ts`, `window.ts`, and `ipc.ts`. This keeps modules testable with fakes and keeps the SDK in one file. `settings-store.ts` and `jira-service.ts` both call `writeAtomic` from `atomic-write.ts` (temp file, mode `0600`, then rename). Neither module keeps its own copy.
+Main is built in one place, `src/main/index.ts` (the composition root). Each module is a factory that receives what it needs as arguments. A module does not import `electron` or another module's concrete instance, except `index.ts`, `window.ts`, and `ipc.ts`. This keeps modules testable with fakes and keeps the SDK in one file. `settings-store.ts`, `jira-service.ts`, and `github-service.ts` all call `writeAtomic` from `atomic-write.ts` (temp file, mode `0600`, then rename). None of them keeps its own copy.
 
 ```mermaid
 flowchart TB
@@ -32,6 +33,8 @@ flowchart TB
     Index --> Files["rules-skills-service.ts: allowlisted file access"]
     Index --> Jira["jira-service.ts: Jira token, assigned tickets"]
     Ipc --> Jira
+    Index --> GitHub["github-service.ts: GitHub tokens, pull requests, projects"]
+    Ipc --> GitHub
     Index --> Agent["agent-service.ts: only importer of @cursor/sdk"]
     Index --> Manager["session-manager.ts: one RepoSession per repo"]
     Ipc --> Manager
@@ -51,7 +54,8 @@ flowchart TB
 | `settings-store.ts` | `settings.json`, chat files, the encrypted key (via an injected `safeStorage`) | Return the key to the renderer |
 | `rules-skills-service.ts` | Reading and writing rules, skills, `AGENTS.md` inside the allowlist | Touch any path outside it |
 | `jira-service.ts` | `jira.bin` (encrypted email, site origin, API token), the ticket search, the browse URL | Import `electron` (it gets `safeStorage` and `openExternal` as arguments), return the token, call any host but the stored `https://<name>.atlassian.net` |
-| `atomic-write.ts` | The temp-file write used by `settings-store.ts` and `jira-service.ts` | Open a file in place, or write a mode other than `0600` |
+| `github-service.ts` | `github.bin` (two encrypted tokens, their logins, the picked repos and projects), the repo list, pull request and project requests, the item URL, the token-page table | Import `electron` (it gets `safeStorage` and `openExternal` as arguments), return a token, call any host but `https://api.github.com`, write to GitHub |
+| `atomic-write.ts` | The temp-file write used by `settings-store.ts`, `jira-service.ts`, and `github-service.ts` | Open a file in place, or write a mode other than `0600` |
 | `agent-service.ts` | `Agent.create`, `Agent.resume`, `send`, stream mapping, cancel, dispose | Know about IPC or the UI |
 | `tool-summary.ts` | The one-line detail for a tool call: a repo-relative path, a command, or a pattern, taken from the call's arguments | Import the SDK or read the result of a call |
 | `session-manager.ts` | The repo map, lazy `AgentService` per repo, global busy checks, shutdown | Call the SDK itself |
@@ -66,6 +70,7 @@ flowchart TB
 |------|-------|-----------|------------------|
 | Cursor API key | `settings-store` | `userData/secrets.bin`, encrypted with `safeStorage`, mode `0600` | Only "is set" |
 | Jira email, site, API token | `jira-service` | `userData/jira.bin`, encrypted with `safeStorage`, mode `0600` | Email, site origin, and "token is set". Never the token |
+| GitHub repos token, Projects token, logins, picked repos and projects | `github-service` | `userData/github.bin`, encrypted with `safeStorage`, mode `0600` | "Token is set" for each, the logins, and the picks. Never a token |
 | Settings (folder, model, mode, theme) | `settings-store` | `userData/settings.json` | Yes. `mode` is `agent` (the default when the field is missing) or `plan`. Theme is `system` (the default), `light`, or `dark` |
 | Chat messages and `agentId` | `settings-store` | `userData/chats/<repoId>.json` | Messages, yes; `agentId`, no |
 | Rules, skills, `AGENTS.md` | `rules-skills-service` | The user's folder (`.cursor/`), shared with Cursor IDE | Yes, through commands |
@@ -93,6 +98,7 @@ flowchart TB
 - Diagrams: a `mermaid` block is drawn in the renderer with `securityLevel: "strict"` and shown through `<img>` with a data URL, so it cannot run script. The page CSP (`img-src 'self' data:`) is unchanged. The `mermaid` code is loaded from the app's own files with a dynamic import.
 - Preload exposes only the command catalog and one event subscription. It exposes no raw `ipcRenderer`.
 - Jira: every request is made in main, so the page CSP (`connect-src 'none'`) is unchanged. The API token is stored like the Cursor key and never appears in an IPC result, a log, or `settings.json`. Search and `shell.openExternal` use only the stored origin, and that origin must be `https://<name>.atlassian.net` with no port and no user info (D-16). The token is not scoped: it is a full account credential, and Mango only uses it to search and to open a browse URL.
+- GitHub: every request is made in main, so the page CSP (`connect-src 'none'`) is unchanged. Both tokens are stored like the Cursor key and never appear in an IPC result, a log, or `settings.json`. Requests go only to `https://api.github.com`, and a `Link` page is followed only when it is on that origin (D-17). `shell.openExternal` receives only a URL from a fixed table (the two token pages) or `https://github.com/<owner>/<repo>/(pull|issues)/<n>`, built in main from a name that matches `^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$` (not `.` or `..`) and a positive number. The window sends `{ kind }` or `{ repo, kind, number }`, never a URL. A classic `repo` token can write to GitHub; Mango only reads, and Setup says so.
 - Every handler checks that the sender is the app's own window, then parses with the command's Zod `input`, then acts. Events are sent only to that window.
 - The key never leaves main. It is not in logs, in IPC results, or in the agent's prompt. The SDK takes `apiKey` as an explicit option (checked in the 1.2.0 typings), and `agent-service.ts` always passes it. Without it the SDK falls back to `CURSOR_API_KEY` and then to a stored `Cursor.auth.login()` key, which could silently use a different account than the one the user entered.
 - File allowlist: the folder is resolved with `realpath`. Allowed targets are `<folder>/.cursor/rules/*.mdc`, `<folder>/.cursor/skills/<name>/SKILL.md`, and `<folder>/AGENTS.md`. A name must match `^[a-z0-9][a-z0-9-_]{0,63}$` (1 to 64 characters). A file that is a symlink is refused. A directory symlink for `.cursor`, `rules`, or `skills` is followed only when its real path stays inside the folder. A skill folder that is itself a symlink is refused on read and delete. A path that resolves outside the folder is refused before any read or write.
@@ -106,6 +112,7 @@ No global state library. One reducer in `renderer/state.ts`. After load, the win
 - **Chat**: the reducer fed by `chat.history` plus the event stream. `segments.ts` turns the items into blocks: a run's text is cut at the `offset` of each tool call, question, and plan, so the thread reads text, a tool strip or card, text, and so on. A tool strip shows one row per call (name, path or command, status) and is four rows tall, with a scrollbar for more. A Task call is its own card (`SubagentCard.tsx`): the task description, the model, and while it runs the latest tool the subagent started, with the status Waiting for subagent. Text and finished plans render as markdown through `Markdown.tsx` (D-14). A `mermaid` fence is drawn as a diagram by `MermaidBlock.tsx` once its message has finished, and shown as code while it streams (D-15). A question card, the banner, a mode control, a model picker, the theme switch, Reset chat, and a Rules button are also in the screen. Reset chat asks for confirmation, then calls `chat.reset`. In a workspace with several repos that also returns to New chat.
 - **Left menu** (`RepoSidebar.tsx`): shown when the workspace has more than one repo. It lists repos that are running, waiting, have history, have an unseen reply, have an error banner, or are the open chat. Remove asks for confirmation, then calls `chat.reset` for that repo. A running or waiting repo cannot be removed. When the removed repo is the one on screen, the window returns to New chat. Header Reset chat uses that same leave. A workspace with one repo has no left menu; Reset chat stays on the empty thread.
 - **Jira tickets** (`JiraTickets.tsx`): a pane that replaces the chat, New chat, or Rules while `jiraOpen` is set. The flag is separate from `view`, so Back (`close-jira`) restores whatever was open, and `open-repo` or `open-home` also clear it. It lists the assigned, not-done issues of the one saved site, with Load more, Retry, and a not-set-up state that links to Setup. A row opens the issue in the system browser. The Jira button is under New chat in the left menu, or in the chat header when the workspace has one repo. Setup has a Jira section (`JiraSetup.tsx`) for the email, the site, and the API token. While the list is open no repo row looks selected.
+- **GitHub Pull requests** (`GitHubPrs.tsx`) and **Projects** (`GitHubProjects.tsx`): two more panes that replace the chat, New chat, or Rules, with `githubPrsOpen` and `githubProjectsOpen`. At most one of `jiraOpen`, `githubPrsOpen`, and `githubProjectsOpen` is true: opening one clears the others, and `open-repo`, `open-home`, and `implement-ticket` clear all three. `screenOf` returns `"githubPrs"` or `"githubProjects"`. The Pull requests pane has one tab per picked repo (`role="tablist"`), loaded on first use and cached per repo, and each row opens the PR in the system browser. The Projects pane is a copy of the Jira board (same classes, same three columns through `projectColumn`, same Implement and Load more), with a project switcher in the header when several projects are picked. A button for each shows in the left menu, or in the chat header when the workspace has one repo, only while its token is saved. Setup has a GitHub block (`GitHubSetup.tsx`): two token fields, each with Get token, a repo picker, and a project picker.
 - **Rules and skills** (`Instructions.tsx`): tabs for rules, skills, and `AGENTS.md`. Rules and skills are a list on the left and a form on the right, with load / edit / save, a dirty flag, and the note that a saved change applies to the next message. `AGENTS.md` is one body field. Leaving the screen with unsaved edits asks for confirmation.
 
 `QuestionForm` takes the question as props and calls back with an answer or a skip. It checks the answer with `shared/questions.ts` before that callback. It does not know about the SDK.
@@ -116,20 +123,22 @@ No global state library. One reducer in `renderer/state.ts`. After load, the win
 src/
   main/       index.ts, window.ts, ipc.ts, session-manager.ts, chat-session.ts,
               agent-service.ts, tool-summary.ts, prompt.ts,
-              rules-skills-service.ts, settings-store.ts, atomic-write.ts, jira-service.ts
+              rules-skills-service.ts, settings-store.ts, atomic-write.ts, jira-service.ts,
+              github-service.ts
   preload/    index.ts, bridge.ts
-  shared/     ipc.ts, jira.ts, questions.ts, mention.ts, plan-markdown.ts (exports isCreatePlan only),
+  shared/     ipc.ts, jira.ts, github.ts, questions.ts, mention.ts, plan-markdown.ts (exports isCreatePlan only),
               task.ts (exports isTask and mergeSubagent)
   renderer/   main.tsx, App.tsx, state.ts, segments.ts, Setup.tsx, Chat.tsx, NewChat.tsx,
               MentionComposer.tsx, RepoSidebar.tsx, QuestionForm.tsx, PlanCard.tsx,
               SubagentCard.tsx, ToolStrip.tsx, Markdown.tsx, markdown-config.ts, MermaidBlock.tsx,
               mermaid-config.ts, mermaid-render.ts, dark-mode.ts,
               Instructions.tsx, RulesEditor.tsx, SkillsEditor.tsx, JiraTickets.tsx,
-              JiraSetup.tsx, Bot.tsx, global.d.ts, styles.css
+              JiraSetup.tsx, GitHubPrs.tsx, GitHubProjects.tsx, GitHubSetup.tsx, Bot.tsx,
+              global.d.ts, styles.css
 docs/         this folder
 scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts,
               mention-check.ts, repos-check.ts, sidebar-check.ts, plan-check.ts,
-              segments-check.ts, tool-summary-check.ts, jira-check.ts,
+              segments-check.ts, tool-summary-check.ts, jira-check.ts, github-check.ts,
               packaged-sdk-check.mjs, after-pack.cjs
 ```
 
@@ -141,4 +150,4 @@ An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only,
 
 ## Out of scope
 
-Windows and Linux, signing and auto-update, the cloud runtime, several chats per repo, an orchestrator, a database, user-level `~/.cursor` editing, and GitHub integration. Jira is read-only and is one Cloud site: no creating or editing tickets, no comments, no Jira Server or Data Center, no OAuth, and no Jira tools for the agent. At most 7 repo agents run at once.
+Windows and Linux, signing and auto-update, the cloud runtime, several chats per repo, an orchestrator, a database, and user-level `~/.cursor` editing. GitHub is read-only: no merging, reviewing, commenting, or moving cards, no org-owned projects, no GitHub Enterprise, and no GitHub tools for the agent. Jira is read-only and is one Cloud site: no creating or editing tickets, no comments, no Jira Server or Data Center, no OAuth, and no Jira tools for the agent. At most 7 repo agents run at once.

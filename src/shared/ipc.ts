@@ -1,5 +1,6 @@
 // Zod contracts for the window and the main process. No I/O.
 import { z } from "zod";
+import { isRepoFullName, MAX_SELECTED_PROJECTS, MAX_SELECTED_REPOS, PROJECT_ID } from "./github.js";
 import { ISSUE_KEY, JIRA_EMAIL } from "./jira.js";
 import { AnswersSchema, PendingQuestionSchema, QuestionSchema } from "./questions.js";
 
@@ -196,6 +197,100 @@ export const JiraIssuesResultSchema = z.object({
 });
 export type JiraIssuesResult = z.infer<typeof JiraIssuesResultSchema>;
 
+export const RepoFullNameSchema = z.string().refine(isRepoFullName, "Unknown repository");
+export const ProjectIdSchema = z.string().max(200).regex(PROJECT_ID, "Unknown project");
+export const GithubTokenSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .regex(/^[\x21-\x7e]+$/, "That does not look like a token");
+export const GithubTokenKindSchema = z.enum(["repos", "projects"]);
+export const GithubItemKindSchema = z.enum(["issue", "pr"]);
+
+export const GithubProjectRefSchema = z.object({
+  id: ProjectIdSchema,
+  title: z.string().max(200),
+});
+export type GithubProjectRef = z.infer<typeof GithubProjectRefSchema>;
+
+/** What the window may know. It never gets a token. `selected` is what Setup saved. */
+export const GithubStatusSchema = z.object({
+  repos: z.object({
+    tokenSet: z.boolean(),
+    login: z.string().nullable(),
+    selected: z.array(RepoFullNameSchema),
+  }),
+  projects: z.object({
+    tokenSet: z.boolean(),
+    login: z.string().nullable(),
+    selected: z.array(GithubProjectRefSchema),
+  }),
+});
+export type GithubStatus = z.infer<typeof GithubStatusSchema>;
+
+export const GithubRepoSchema = z.object({
+  fullName: RepoFullNameSchema,
+  private: z.boolean(),
+  archived: z.boolean(),
+});
+export type GithubRepo = z.infer<typeof GithubRepoSchema>;
+
+export const GithubReposResultSchema = z.object({
+  repos: z.array(GithubRepoSchema),
+  /** True when the token can see more repos than the 10 pages Mango reads. */
+  truncated: z.boolean(),
+});
+export type GithubReposResult = z.infer<typeof GithubReposResultSchema>;
+
+export const GithubPrSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  author: z.string(),
+  headRefName: z.string(),
+  baseRefName: z.string(),
+  isDraft: z.boolean(),
+  updatedAt: z.string(),
+  review: z.enum(["approved", "changes", "required"]).nullable(),
+  /** True when the signed-in user's latest review on this pull request is an approval. */
+  approvedByYou: z.boolean(),
+  ci: z.enum(["passing", "failing", "pending"]).nullable(),
+  /** True when the local checkout has pr-reviews/<number>.md. */
+  hasReview: z.boolean(),
+});
+export type GithubPr = z.infer<typeof GithubPrSchema>;
+
+export const GithubPrsResultSchema = z.object({
+  prs: z.array(GithubPrSchema),
+  /** Open pull requests in the repo. More than `prs.length` when GitHub has more than one page. */
+  total: z.number().int().min(0),
+});
+export type GithubPrsResult = z.infer<typeof GithubPrsResultSchema>;
+
+export const GithubProjectsResultSchema = z.object({
+  projects: z.array(GithubProjectRefSchema),
+});
+export type GithubProjectsResult = z.infer<typeof GithubProjectsResultSchema>;
+
+export const GithubItemSchema = z.object({
+  id: z.string().min(1).max(200),
+  kind: z.enum(["issue", "pr", "draft"]),
+  /** Null for a draft item. */
+  repo: RepoFullNameSchema.nullable(),
+  /** Null for a draft item. */
+  number: z.number().int().positive().nullable(),
+  title: z.string(),
+  /** The project's Status value. Empty when the item has none. */
+  status: z.string(),
+});
+export type GithubItem = z.infer<typeof GithubItemSchema>;
+
+export const GithubItemsResultSchema = z.object({
+  items: z.array(GithubItemSchema),
+  nextCursor: z.string().min(1).max(2_000).optional(),
+});
+export type GithubItemsResult = z.infer<typeof GithubItemsResultSchema>;
+
 const None = z.object({}).strict();
 
 const SendResultSchema = z.object({
@@ -297,6 +392,63 @@ export const COMMANDS = {
   },
   "flow:jira.open": {
     input: z.object({ key: IssueKeySchema }).strict(),
+    output: None,
+  },
+  "flow:github.status": { input: None, output: GithubStatusSchema },
+  "flow:github.saveRepoToken": {
+    input: z.object({ token: GithubTokenSchema }).strict(),
+    output: GithubStatusSchema,
+  },
+  "flow:github.clearRepoToken": { input: None, output: GithubStatusSchema },
+  "flow:github.saveProjectToken": {
+    input: z.object({ token: GithubTokenSchema }).strict(),
+    output: GithubStatusSchema,
+  },
+  "flow:github.clearProjectToken": { input: None, output: GithubStatusSchema },
+  "flow:github.repos": { input: None, output: GithubReposResultSchema },
+  "flow:github.selectRepos": {
+    input: z.object({ repos: z.array(RepoFullNameSchema).max(MAX_SELECTED_REPOS) }).strict(),
+    output: GithubStatusSchema,
+  },
+  "flow:github.prs": {
+    input: z.object({ repo: RepoFullNameSchema }).strict(),
+    output: GithubPrsResultSchema,
+  },
+  "flow:github.projects": { input: None, output: GithubProjectsResultSchema },
+  "flow:github.selectProjects": {
+    input: z.object({ projects: z.array(GithubProjectRefSchema).max(MAX_SELECTED_PROJECTS) }).strict(),
+    output: GithubStatusSchema,
+  },
+  "flow:github.projectItems": {
+    input: z
+      .object({
+        projectId: ProjectIdSchema,
+        cursor: z.string().min(1).max(2_000).optional(),
+      })
+      .strict(),
+    output: GithubItemsResultSchema,
+  },
+  "flow:github.open": {
+    input: z
+      .object({
+        repo: RepoFullNameSchema,
+        kind: GithubItemKindSchema,
+        number: z.number().int().min(1).max(999_999_999),
+      })
+      .strict(),
+    output: None,
+  },
+  "flow:github.openReview": {
+    input: z
+      .object({
+        repo: RepoFullNameSchema,
+        number: z.number().int().min(1).max(999_999_999),
+      })
+      .strict(),
+    output: None,
+  },
+  "flow:github.openTokenPage": {
+    input: z.object({ kind: GithubTokenKindSchema }).strict(),
     output: None,
   },
 } as const;

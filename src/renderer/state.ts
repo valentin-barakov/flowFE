@@ -67,6 +67,10 @@ export type AppState = {
   instructionsOpen: boolean;
   /** The Jira ticket list replaces the main pane. `view` and `instructionsOpen` stay as they were. */
   jiraOpen: boolean;
+  /** The GitHub Pull requests pane replaces the main pane like jiraOpen. At most one of the three panes is open. */
+  githubPrsOpen: boolean;
+  /** The GitHub Projects pane replaces the main pane like jiraOpen. At most one of the three panes is open. */
+  githubProjectsOpen: boolean;
   view: View;
   repos: RepoListItem[];
   chats: Record<string, ChatSlice>;
@@ -98,6 +102,28 @@ export function isBusyState(state: ChatStateName): boolean {
   return state === "streaming" || state === "stopping" || state === "awaitingAnswer";
 }
 
+export type PaneKey = "jiraOpen" | "githubPrsOpen" | "githubProjectsOpen";
+
+const NO_PANE = { jiraOpen: false, githubPrsOpen: false, githubProjectsOpen: false } as const;
+
+/** True while the Jira list or a GitHub pane covers the chat, New chat, or Rules. */
+export function paneOpen(state: AppState): boolean {
+  return state.jiraOpen || state.githubPrsOpen || state.githubProjectsOpen;
+}
+
+/** Closes one pane. The chat underneath, if any, is no longer unseen. */
+function closePane(state: AppState, key: PaneKey): AppState {
+  if (!state[key]) return state;
+  const underneath = state.view.kind === "repo" ? state.view.repo : null;
+  const slice = underneath === null ? undefined : state.chats[underneath];
+  const next: AppState = {
+    ...state,
+    chats: underneath !== null && slice !== undefined ? { ...state.chats, [underneath]: { ...slice, unseen: false } } : state.chats,
+  };
+  next[key] = false;
+  return next;
+}
+
 export type SidebarRow = {
   name: string;
   status: "idle" | "running" | "waiting" | "error";
@@ -110,8 +136,8 @@ export function sidebarRows(state: AppState): SidebarRow[] {
   for (const row of state.repos) {
     const slice = state.chats[row.name];
     const current = state.view.kind === "repo" && state.view.repo === row.name;
-    // While the Jira list is open no row looks selected, but the chat underneath keeps its row.
-    const active = current && !state.jiraOpen;
+    // While a pane is open no row looks selected, but the chat underneath keeps its row.
+    const active = current && !paneOpen(state);
     if (
       !current &&
       !row.hasHistory &&
@@ -200,6 +226,10 @@ export type Action =
   | { type: "close-instructions" }
   | { type: "open-jira" }
   | { type: "close-jira" }
+  | { type: "open-github-prs" }
+  | { type: "close-github-prs" }
+  | { type: "open-github-projects" }
+  | { type: "close-github-projects" }
   | { type: "open-home" }
   | { type: "open-repo"; repo: string }
   | {
@@ -245,6 +275,8 @@ export const initialState: AppState = {
   modelsError: null,
   instructionsOpen: false,
   jiraOpen: false,
+  githubPrsOpen: false,
+  githubProjectsOpen: false,
   view: { kind: "home" },
   repos: [],
   chats: {},
@@ -319,23 +351,23 @@ export function reducer(state: AppState, action: Action): AppState {
     case "close-instructions":
       return { ...state, instructionsOpen: false };
     case "open-jira":
-      return { ...state, jiraOpen: true };
-    case "close-jira": {
-      if (!state.jiraOpen) return state;
-      const underneath = state.view.kind === "repo" ? state.view.repo : null;
-      const slice = underneath === null ? undefined : state.chats[underneath];
-      return {
-        ...state,
-        jiraOpen: false,
-        chats: underneath !== null && slice !== undefined ? { ...state.chats, [underneath]: { ...slice, unseen: false } } : state.chats,
-      };
-    }
+      return { ...state, ...NO_PANE, jiraOpen: true };
+    case "close-jira":
+      return closePane(state, "jiraOpen");
+    case "open-github-prs":
+      return { ...state, ...NO_PANE, githubPrsOpen: true };
+    case "close-github-prs":
+      return closePane(state, "githubPrsOpen");
+    case "open-github-projects":
+      return { ...state, ...NO_PANE, githubProjectsOpen: true };
+    case "close-github-projects":
+      return closePane(state, "githubProjectsOpen");
     case "open-home":
       return {
         ...state,
         view: { kind: "home" },
         instructionsOpen: false,
-        jiraOpen: false,
+        ...NO_PANE,
         homePickFolder: false,
       };
     case "implement-ticket":
@@ -343,7 +375,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         view: { kind: "home" },
         instructionsOpen: false,
-        jiraOpen: false,
+        ...NO_PANE,
         homeDraft: action.text,
         homeNotice: null,
         homePickFolder: true,
@@ -354,7 +386,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         view: { kind: "repo", repo: action.repo },
         instructionsOpen: false,
-        jiraOpen: false,
+        ...NO_PANE,
         chats: { ...state.chats, [action.repo]: { ...current, unseen: false } },
       };
     }
@@ -497,10 +529,14 @@ export function reducer(state: AppState, action: Action): AppState {
   }
 }
 
-export function screenOf(state: AppState): "loading" | "setup" | "jira" | "instructions" | "home" | "chat" {
+export type Screen = "loading" | "setup" | "jira" | "githubPrs" | "githubProjects" | "instructions" | "home" | "chat";
+
+export function screenOf(state: AppState): Screen {
   if (!state.booted || state.settings === null) return "loading";
   if (!state.settings.setupComplete || state.editing) return "setup";
   if (state.jiraOpen) return "jira";
+  if (state.githubPrsOpen) return "githubPrs";
+  if (state.githubProjectsOpen) return "githubProjects";
   if (state.instructionsOpen && state.view.kind === "repo") return "instructions";
   if (state.view.kind === "home") return "home";
   return "chat";
@@ -627,7 +663,7 @@ function routeEvent(state: AppState, event: FlowEvent): AppState {
   const onScreen =
     state.view.kind === "repo" &&
     state.view.repo === event.repo &&
-    !state.jiraOpen;
+    !paneOpen(state);
   if (!onScreen && (event.type === "chat.done" || event.type === "chat.error" || event.type === "question.asked")) {
     slice = { ...slice, unseen: true };
   }

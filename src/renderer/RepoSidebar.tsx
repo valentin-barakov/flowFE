@@ -8,13 +8,36 @@ type RepoSidebarProps = {
   fruits: readonly ChatFruit[];
   pending: boolean;
   jiraActive: boolean;
+  /** Show the Pull requests button. True only while the repos token is saved. */
+  githubPrs: boolean;
+  /** Show the Projects button. True only while the Projects token is saved. */
+  githubProjects: boolean;
+  prsActive: boolean;
+  projectsActive: boolean;
   onOpen: (name: string) => void;
   onNew: () => void;
   onJira: () => void;
+  onGithubPrs: () => void;
+  onGithubProjects: () => void;
   onRemove: (name: string) => void;
 };
 
-export function RepoSidebar({ rows, fruits, pending, jiraActive, onOpen, onNew, onJira, onRemove }: RepoSidebarProps) {
+export function RepoSidebar({
+  rows,
+  fruits,
+  pending,
+  jiraActive,
+  githubPrs,
+  githubProjects,
+  prsActive,
+  projectsActive,
+  onOpen,
+  onNew,
+  onJira,
+  onGithubPrs,
+  onGithubProjects,
+  onRemove,
+}: RepoSidebarProps) {
   const [confirmName, setConfirmName] = useState<string | null>(null);
   const confirming = rows.find((row) => row.name === confirmName) ?? null;
   const confirmBlocked = confirming === null || confirming.status === "running" || confirming.status === "waiting" || pending;
@@ -27,6 +50,16 @@ export function RepoSidebar({ rows, fruits, pending, jiraActive, onOpen, onNew, 
       <button type="button" className="btn" aria-current={jiraActive ? "page" : undefined} onClick={onJira}>
         Jira
       </button>
+      {githubPrs ? (
+        <button type="button" className="btn" aria-current={prsActive ? "page" : undefined} onClick={onGithubPrs}>
+          Pull requests
+        </button>
+      ) : null}
+      {githubProjects ? (
+        <button type="button" className="btn" aria-current={projectsActive ? "page" : undefined} onClick={onGithubProjects}>
+          Projects
+        </button>
+      ) : null}
       <ul className="repo-list">
         {rows.map((row, index) => {
           const blocked = row.status === "running" || row.status === "waiting" || pending;

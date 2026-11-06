@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { COMMANDS, failure, type CommandChannel, type FlowEvent, type InputOf, type OutputOf, type Result } from "../shared/ipc.js";
 import type { SessionManager } from "./session-manager.js";
 import { SessionError } from "./chat-session.js";
+import { GithubError, type GithubService } from "./github-service.js";
 import { JiraError, type JiraService } from "./jira-service.js";
 import type { RulesSkills } from "./rules-skills-service.js";
 import { FilesError } from "./rules-skills-service.js";
@@ -13,7 +14,13 @@ export type IpcHost = {
   senderId: number;
 };
 
-export function registerIpc(host: IpcHost, manager: SessionManager, files: RulesSkills, jira: JiraService): void {
+export function registerIpc(
+  host: IpcHost,
+  manager: SessionManager,
+  files: RulesSkills,
+  jira: JiraService,
+  github: GithubService,
+): void {
   const channels = Object.keys(COMMANDS) as CommandChannel[];
   for (const channel of channels) {
     ipcMain.handle(channel, async (event, input: unknown): Promise<Result<OutputOf<typeof channel>>> => {
@@ -23,7 +30,7 @@ export function registerIpc(host: IpcHost, manager: SessionManager, files: Rules
       const parsed = COMMANDS[channel].input.safeParse(input);
       if (!parsed.success) return failure("invalid_input", issueMessage(parsed.error), false);
       try {
-        const value = await run(channel, parsed.data, host, manager, files, jira);
+        const value = await run(channel, parsed.data, host, manager, files, jira, github);
         const checked = COMMANDS[channel].output.safeParse(value);
         if (!checked.success) return failure("io_error", "The app sent a bad response", false);
         return { ok: true, value: checked.data };
@@ -31,6 +38,7 @@ export function registerIpc(host: IpcHost, manager: SessionManager, files: Rules
         if (error instanceof SessionError) return failure(error.code, error.message, error.retryable);
         if (error instanceof FilesError) return failure(error.code, error.message, error.retryable);
         if (error instanceof JiraError) return failure(error.code, error.message, error.retryable);
+        if (error instanceof GithubError) return failure(error.code, error.message, error.retryable);
         return failure("io_error", "Something went wrong", false);
       }
     });
@@ -50,6 +58,7 @@ async function run<C extends CommandChannel>(
   manager: SessionManager,
   files: RulesSkills,
   jira: JiraService,
+  github: GithubService,
 ): Promise<OutputOf<C>> {
   switch (channel) {
     case "flow:settings.get":
@@ -154,6 +163,42 @@ async function run<C extends CommandChannel>(
       return (await jira.issues(input as InputOf<"flow:jira.issues">)) as OutputOf<C>;
     case "flow:jira.open":
       await jira.open((input as InputOf<"flow:jira.open">).key);
+      return {} as OutputOf<C>;
+    case "flow:github.status":
+      return github.status() as OutputOf<C>;
+    case "flow:github.saveRepoToken":
+      return (await github.saveRepoToken(input as InputOf<"flow:github.saveRepoToken">)) as OutputOf<C>;
+    case "flow:github.clearRepoToken":
+      return github.clearRepoToken() as OutputOf<C>;
+    case "flow:github.saveProjectToken":
+      return (await github.saveProjectToken(input as InputOf<"flow:github.saveProjectToken">)) as OutputOf<C>;
+    case "flow:github.clearProjectToken":
+      return github.clearProjectToken() as OutputOf<C>;
+    case "flow:github.repos":
+      return (await github.repos()) as OutputOf<C>;
+    case "flow:github.selectRepos":
+      return github.selectRepos(input as InputOf<"flow:github.selectRepos">) as OutputOf<C>;
+    case "flow:github.prs":
+      return (await github.prs(input as InputOf<"flow:github.prs">)) as OutputOf<C>;
+    case "flow:github.projects":
+      return (await github.projects()) as OutputOf<C>;
+    case "flow:github.selectProjects":
+      return github.selectProjects(input as InputOf<"flow:github.selectProjects">) as OutputOf<C>;
+    case "flow:github.projectItems": {
+      const body = input as InputOf<"flow:github.projectItems">;
+      return (await github.projectItems({
+        projectId: body.projectId,
+        ...(body.cursor !== undefined ? { cursor: body.cursor } : {}),
+      })) as OutputOf<C>;
+    }
+    case "flow:github.open":
+      await github.open(input as InputOf<"flow:github.open">);
+      return {} as OutputOf<C>;
+    case "flow:github.openReview":
+      await github.openReview(input as InputOf<"flow:github.openReview">);
+      return {} as OutputOf<C>;
+    case "flow:github.openTokenPage":
+      await github.openTokenPage(input as InputOf<"flow:github.openTokenPage">);
       return {} as OutputOf<C>;
     default:
       return assertNever(channel);
