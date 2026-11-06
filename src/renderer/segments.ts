@@ -1,5 +1,6 @@
 // Rebuilds the order of one run for display: text, tool calls, text, and so on.
 // Pure. It reads the items the reducer holds and never changes them.
+import { isTask } from "../shared/task.js";
 import type { Item } from "./state.js";
 
 export type UserItem = Extract<Item, { role: "user" }>;
@@ -11,6 +12,7 @@ export type Block =
   | { kind: "user"; key: string; item: UserItem }
   | { kind: "question"; key: string; item: QuestionItem }
   | { kind: "plan"; key: string; item: ToolItem; plan: string }
+  | { kind: "subagent"; key: string; item: ToolItem; agentId: string | null }
   | { kind: "tools"; key: string; tools: ToolItem[]; agentId: string | null }
   | { kind: "text"; key: string; agent: AgentItem; text: string; header: boolean; last: boolean };
 
@@ -77,6 +79,16 @@ export function toolPhase(
   return TOOL_PHASE[status];
 }
 
+/** Same phases as a tool row. A live run says it is waiting on the subagent. */
+export function subagentPhase(
+  status: ToolItem["status"],
+  live: boolean,
+): { phase: "running" | "finished" | "failed" | "stopped"; label: string } {
+  const phase = toolPhase(status, live);
+  if (phase.phase === "running") return { phase: "running", label: "Waiting for subagent" };
+  return phase;
+}
+
 function expandRun(blocks: Block[], parts: readonly Part[], agent: AgentItem | null): void {
   const text = agent === null ? "" : agent.text;
   const agentId = agent === null ? null : agent.id;
@@ -108,6 +120,10 @@ function pushPart(blocks: Block[], part: Part, agentId: string | null): void {
   }
   if (part.status === "ok" && part.plan !== undefined && part.plan !== "") {
     blocks.push({ kind: "plan", key: part.id, item: part, plan: part.plan });
+    return;
+  }
+  if (isTask(part.name)) {
+    blocks.push({ kind: "subagent", key: part.id, item: part, agentId });
     return;
   }
   const previous = blocks[blocks.length - 1];

@@ -114,3 +114,62 @@ function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
 }
+
+const DESCRIPTION_MAX = 200;
+const MODEL_MAX = 120;
+
+/** The title and model of a Task call. The prompt stays off the card. */
+export function taskFields(args: unknown): { description: string; model?: string } | null {
+  const record = flatten(asRecord(args));
+  if (record === null) return null;
+  const description = textAt(record, ["description"]).replace(/\s+/g, " ").trim();
+  if (description === "") return null;
+  const model = textAt(record, ["model"]).replace(/\s+/g, " ").trim();
+  return {
+    description: clip(description, DESCRIPTION_MAX),
+    ...(model === "" ? {} : { model: clip(model, MODEL_MAX) }),
+  };
+}
+
+const TOOL_LABEL: Record<string, string> = {
+  read: "Read",
+  edit: "Edit",
+  write: "Write",
+  delete: "Delete",
+  shell: "Shell",
+  grep: "Grep",
+  glob: "Glob",
+  ls: "List",
+  semSearch: "Search",
+  mcp: "MCP",
+  createPlan: "Plan",
+  updateTodos: "Todos",
+  task: "Subagent",
+};
+
+export type TaskActivity = { callId: string; line: string; replace: boolean };
+
+/**
+ * One line for the subagent card, from a nested `tool-call-delta`.
+ * `replace` is false for "Thinking", so a tool line already on the card stays.
+ * The public run stream drops these nested updates, so the caller listens on `send({ onDelta })`.
+ */
+export function taskActivity(
+  update: { type: string; callId?: string; taskUpdate?: { type: string; toolCall?: { type?: string; args?: unknown } } },
+  cwd: string,
+): TaskActivity | null {
+  if (update.type !== "tool-call-delta") return null;
+  const callId = update.callId?.trim() ?? "";
+  if (callId === "") return null;
+  const nested = update.taskUpdate;
+  if (nested === undefined) return null;
+  if (nested.type === "thinking-delta") return { callId, line: "Thinking", replace: false };
+  if (nested.type !== "tool-call-started" && nested.type !== "partial-tool-call" && nested.type !== "tool-call-completed") {
+    return null;
+  }
+  const kind = nested.toolCall?.type?.trim() ?? "";
+  if (kind === "") return null;
+  const detail = toolDetail(nested.toolCall?.args, cwd, kind);
+  const title = TOOL_LABEL[kind] ?? kind;
+  return { callId, line: clip(detail === "" ? title : `${title} ${detail}`, MAX_DETAIL), replace: true };
+}

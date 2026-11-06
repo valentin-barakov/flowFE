@@ -6,6 +6,7 @@ import { PlanCard } from "./PlanCard.js";
 import { QuestionForm } from "./QuestionForm.js";
 import { buildBlocks, type Block } from "./segments.js";
 import { ModeSwitch, modelChoices, ThemeSwitch } from "./Setup.js";
+import { SubagentCard } from "./SubagentCard.js";
 import type { Banner, Item, ModelChoice } from "./state.js";
 import { ToolStrip } from "./ToolStrip.js";
 
@@ -34,6 +35,8 @@ type ChatProps = {
   onReset: () => void;
   onSetup: () => void;
   onInstructions: () => void;
+  /** Null when the left menu already has the Jira button. */
+  onJira: (() => void) | null;
   onDismiss: () => void;
   onRetry: () => void;
   onBannerSetup: () => void;
@@ -92,6 +95,11 @@ export function Chat(props: ChatProps) {
           <button type="button" className="btn" disabled={busy || props.pending} onClick={() => setConfirmReset(true)}>
             Reset chat
           </button>
+          {props.onJira ? (
+            <button type="button" className="btn" onClick={props.onJira}>
+              Jira
+            </button>
+          ) : null}
           <button type="button" className="btn" onClick={props.onInstructions}>
             Rules
           </button>
@@ -168,6 +176,8 @@ export function Chat(props: ChatProps) {
               key={block.key}
               block={block}
               liveId={liveId}
+              models={props.models}
+              selectedModel={props.model}
               stopping={props.chatState === "stopping"}
               waiting={waiting}
               onAnswer={props.onAnswer}
@@ -219,6 +229,8 @@ export function Chat(props: ChatProps) {
 function BlockView({
   block,
   liveId,
+  models,
+  selectedModel,
   stopping,
   waiting,
   onAnswer,
@@ -226,6 +238,8 @@ function BlockView({
 }: {
   block: Block;
   liveId: string | null;
+  models: readonly ModelChoice[];
+  selectedModel: string;
   stopping: boolean;
   waiting: boolean;
   onAnswer: (questionId: string, answers: Answers) => Promise<string | null>;
@@ -248,6 +262,16 @@ function BlockView({
   }
   if (block.kind === "plan") {
     return <PlanCard markdown={block.plan} truncated={block.item.truncated === true} />;
+  }
+  if (block.kind === "subagent") {
+    return (
+      <SubagentCard
+        item={block.item}
+        live={block.agentId !== null && block.agentId === liveId}
+        models={models}
+        selectedModel={selectedModel}
+      />
+    );
   }
   if (block.kind === "tools") {
     return (

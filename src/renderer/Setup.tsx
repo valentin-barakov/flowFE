@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AgentMode, Settings, Theme } from "../shared/ipc.js";
 import { Bot } from "./Bot.js";
+import { JiraSetup, type JiraSetupProps } from "./JiraSetup.js";
 import type { ModelChoice } from "./state.js";
 
 type SetupProps = {
@@ -17,9 +18,11 @@ type SetupProps = {
   onTheme: (theme: Theme) => void;
   onMode: (mode: AgentMode) => void;
   onBack: (() => void) | null;
+  backLabel: string;
+  jira: JiraSetupProps;
 };
 
-export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onMode, onBack }: SetupProps) {
+export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onMode, onBack, backLabel, jira }: SetupProps) {
   const [replacing, setReplacing] = useState(false);
   const [key, setKey] = useState("");
   const showKeyField = !settings.keySet || replacing;
@@ -130,10 +133,12 @@ export function Setup({ settings, models, modelsError, pending, repos, locked, o
           <ModeSwitch mode={settings.mode} disabled={pending || locked} onMode={onMode} />
         </section>
 
+        <JiraSetup {...jira} pending={pending} />
+
         {onBack ? (
           <p className="actions">
             <button type="button" className="btn" onClick={onBack}>
-              Back to chat
+              {backLabel}
             </button>
           </p>
         ) : null}

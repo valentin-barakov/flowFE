@@ -1,5 +1,6 @@
 // Zod contracts for the window and the main process. No I/O.
 import { z } from "zod";
+import { ISSUE_KEY, JIRA_EMAIL } from "./jira.js";
 import { AnswersSchema, PendingQuestionSchema, QuestionSchema } from "./questions.js";
 
 export const ErrorCodeSchema = z.enum([
@@ -73,6 +74,13 @@ export const SettingsSchema = z.object({
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
+export const SubagentSchema = z.object({
+  description: z.string().max(200).optional(),
+  model: z.string().max(120).optional(),
+  activity: z.string().max(160).optional(),
+});
+export type Subagent = z.infer<typeof SubagentSchema>;
+
 export const MessageSchema = z.discriminatedUnion("role", [
   z.object({
     id: z.string().min(1),
@@ -96,6 +104,8 @@ export const MessageSchema = z.discriminatedUnion("role", [
     at: z.string().min(1),
     plan: z.string().max(PLAN_TEXT_MAX).optional(),
     truncated: z.boolean().optional(),
+    /** Set when this call launched a subagent. Absent for every other tool. */
+    subagent: SubagentSchema.optional(),
     /** Characters of agent text that existed when this call first appeared. Absent in old chats. */
     offset: z.number().int().min(0).optional(),
   }),
@@ -150,6 +160,39 @@ export const SkillSchema = z.object({
   body: z.string().max(200_000),
 });
 export type Skill = z.infer<typeof SkillSchema>;
+
+export const IssueKeySchema = z.string().regex(ISSUE_KEY, "Unknown issue key");
+
+export const JiraEmailSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(200)
+  .regex(JIRA_EMAIL, "Enter the Atlassian account email");
+
+/** What the window may know. It never gets the token. `site` is the stored https origin. */
+export const JiraStatusSchema = z.object({
+  email: z.string().nullable(),
+  site: z.string().nullable(),
+  tokenSet: z.boolean(),
+});
+export type JiraStatus = z.infer<typeof JiraStatusSchema>;
+
+export const JiraIssueSchema = z.object({
+  key: IssueKeySchema,
+  summary: z.string(),
+  status: z.string(),
+  type: z.string(),
+  project: z.string(),
+  updated: z.string(),
+});
+export type JiraIssue = z.infer<typeof JiraIssueSchema>;
+
+export const JiraIssuesResultSchema = z.object({
+  issues: z.array(JiraIssueSchema),
+  nextPageToken: z.string().min(1).max(2_000).optional(),
+});
+export type JiraIssuesResult = z.infer<typeof JiraIssuesResultSchema>;
 
 const None = z.object({}).strict();
 
@@ -234,6 +277,26 @@ export const COMMANDS = {
     input: z.object({ repo: RepoNameSchema, body: z.string().max(200_000) }).strict(),
     output: z.object({ body: z.string() }),
   },
+  "flow:jira.status": { input: None, output: JiraStatusSchema },
+  "flow:jira.save": {
+    input: z
+      .object({
+        email: JiraEmailSchema,
+        site: z.string().trim().min(1).max(200),
+        token: z.string().trim().min(1).max(500).optional(),
+      })
+      .strict(),
+    output: JiraStatusSchema,
+  },
+  "flow:jira.clear": { input: None, output: JiraStatusSchema },
+  "flow:jira.issues": {
+    input: z.object({ pageToken: z.string().min(1).max(2_000).optional() }).strict(),
+    output: JiraIssuesResultSchema,
+  },
+  "flow:jira.open": {
+    input: z.object({ key: IssueKeySchema }).strict(),
+    output: None,
+  },
 } as const;
 
 export type CommandChannel = keyof typeof COMMANDS;
@@ -263,6 +326,7 @@ export const EventSchema = z.discriminatedUnion("type", [
     summary: z.string(),
     plan: z.string().max(PLAN_TEXT_MAX).optional(),
     truncated: z.boolean().optional(),
+    subagent: SubagentSchema.optional(),
     offset: z.number().int().min(0).optional(),
   }),
   z.object({

@@ -6,6 +6,8 @@ When the workspace has several repos, the left menu lists the chats that are run
 
 The chat has an Agent or Plan control. Agent is the default. In Plan mode, a plan the agent writes is shown as a document in the thread.
 
+Jira is optional. In Setup, paste your Atlassian account email, the site address (`https://<your-site>.atlassian.net`), and an API token from `https://id.atlassian.com/manage-profile/security/api-tokens`. The token is encrypted with `safeStorage` and never shown again. It is not scoped: it can do what that account can do, and Mango only uses it to list the tickets assigned to you that are not Done. The Jira button opens that list in place of the chat (under New chat in the left menu, or in the chat header when the workspace has one repo). Back, or a left-menu agent, returns to the chat. A row opens the issue in your browser.
+
 The agent runs on this Mac through `@cursor/sdk` (local runtime). The model is still served by Cursor, so the app needs a Cursor API key. The key is stored with Electron `safeStorage` and is never shown again.
 
 ## Run
@@ -40,8 +42,9 @@ npm run check:sidebar
 npm run check:plan
 npm run check:segments
 npm run check:tools
+npm run check:jira
 ```
 
 Question-argument parsing is covered by `npm run check:questions`. File-path checks live in `scripts/phase2-files-check.mjs`.
 
-`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.
+`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos`, `check:segments`, and `check:tools` use `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`. `check:jira` covers the site check, the issue key, the search request (Basic auth, the JQL, and the page token), and the renderer state that opens and closes the ticket list. The live list needs a real API token and is checked by hand.

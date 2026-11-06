@@ -96,6 +96,14 @@ A fenced `mermaid` block in agent text or a plan is drawn with `mermaid` 12.3.0,
 **Rejected:** inserting the SVG into the page with `dangerouslySetInnerHTML` (the sanitizer would be the only guard); rendering diagrams in main or in a hidden window (a new process boundary); a charting library such as Chart.js (a second format the agent does not write); leaving diagrams as code.
 **Still open:** zoom, pan, and export of a diagram; text inside a diagram image cannot be selected.
 
+### D-16: Jira tickets are read with an API token, in main (accepted)
+
+A Jira control shows the issues assigned to the user whose status category is not Done. The user creates an API token at id.atlassian.com and pastes the Atlassian email, the site (`https://<name>.atlassian.net`), and the token into Setup. Main stores all three in `userData/jira.bin`, encrypted with `safeStorage`. Search is `POST https://<site>.atlassian.net/rest/api/3/search/jql` with Basic auth (`email:token`), 50 per page, followed only by Jira's `nextPageToken`. The query is `assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`. A row opens in the system browser through `flow:jira.open`, which builds `https://<site>.atlassian.net/browse/<KEY>` in main. The token is sent only to that stored origin. No dependency is added.
+**Reason:** Valentin, 2026-11-06. Atlassian 3LO needs an `https` callback, and the developer console rejects `http://127.0.0.1`, so a loopback sign-in cannot be registered. An API token is what Atlassian documents for a script calling the Cloud REST API.
+**Rejected:** OAuth 3LO with a loopback callback (the console will not save `http://127.0.0.1:47821/callback`); OAuth with a public relay or a tunnel (a host to run, and the code would leave the Mac); a Mango-owned OAuth client (a secret cannot be kept in a desktop app); loading Jira in the window (the window loads no remote URL); a generic "open any URL" command (D-14 still wants one, and this is narrower); giving the agent Jira tools (out of scope); caching tickets on disk.
+**Accepted trade-off:** the token is not scoped. It can do whatever the account can do, until the user revokes it or the expiry they set is reached. Mango only searches and opens browse URLs.
+**Still open:** the live search needs a real token and site. It is a manual check, not part of `npm run check:jira`.
+
 ## Open questions
 
 | ID | Question | Answer | Owner |
@@ -106,6 +114,7 @@ A fenced `mermaid` block in agent text or a plan is drawn with `mermaid` 12.3.0,
 | Q-4 | A read-only mode (no shell or edit tools)? | **Answered (Valentin, 2026-11-05):** not in v1. See D-12 | none |
 | Q-5 | Does `Agent.resume(agentId, options)` re-read the project's rules and skills? | **Answered (2026-11-05):** the reply kept the old rule ending after the file changed. Recreate the agent after an edit | none |
 | Q-6 | Does the SDK take the key as an option, or only from the environment? | **Answered (1.2.0 typings):** explicit `apiKey` option, always passed | none |
+| Q-7 | How does Mango sign in to Jira if localhost OAuth callbacks are rejected? | **Answered (Valentin, 2026-11-06):** an API token, email, and one site address. See D-16 | none |
 
 ## Phase 0 spike checklist
 

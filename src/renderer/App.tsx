@@ -1,8 +1,22 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { BUSY_CAP_MESSAGE, MAX_BUSY_REPOS, busyRepoMessage, type AgentMode, type Answers, type ChatStateName, type FlowEvent, type Settings, type Theme } from "../shared/ipc.js";
+import {
+  BUSY_CAP_MESSAGE,
+  MAX_BUSY_REPOS,
+  busyRepoMessage,
+  type AgentMode,
+  type Answers,
+  type ChatStateName,
+  type FlowEvent,
+  type JiraStatus,
+  type Result,
+  type Settings,
+  type Theme,
+} from "../shared/ipc.js";
 import { parseMention } from "../shared/mention.js";
 import { Chat } from "./Chat.js";
 import { Instructions } from "./Instructions.js";
+import type { JiraSetupProps } from "./JiraSetup.js";
+import { JiraTickets } from "./JiraTickets.js";
 import { NewChat } from "./NewChat.js";
 import { RepoSidebar } from "./RepoSidebar.js";
 import { Setup } from "./Setup.js";
@@ -14,18 +28,46 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [pending, setPending] = useState(false);
   const [modelEpoch, setModelEpoch] = useState(0);
+  const [jira, setJira] = useState<JiraStatus | null>(null);
+  const [jiraMessage, setJiraMessage] = useState<string | null>(null);
   const bootHold = useRef<HeldEvents>({ hold: true, events: [] });
   const holds = useRef<Map<string, HeldEvents>>(new Map());
   const loadTokens = useRef<Map<string, number>>(new Map());
   const stateRef = useRef(state);
   stateRef.current = state;
   const screen = screenOf(state);
+  const hasSidebar = state.repos.length > 1;
+  // Jira covers chat, New chat, or Rules. The model list follows that screen, so opening Jira does not refetch.
+  const modelsScreen =
+    screen === "jira"
+      ? state.instructionsOpen && state.view.kind === "repo"
+        ? "instructions"
+        : state.view.kind === "home"
+          ? "home"
+          : "chat"
+      : screen;
 
   useEffect(() => {
     const theme = state.settings?.theme ?? "system";
     document.documentElement.style.colorScheme = theme === "system" ? "light dark" : theme;
     document.documentElement.dataset.theme = theme;
   }, [state.settings?.theme]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.flow.invoke("flow:jira.status", {}).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setJira(result.value);
+        return;
+      }
+      setJiraMessage(result.error.message);
+      setJira({ email: null, site: null, tokenSet: false });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +147,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!state.settings?.keySet || (screen !== "setup" && screen !== "chat")) return;
+    if (!state.settings?.keySet || (modelsScreen !== "setup" && modelsScreen !== "chat")) return;
     let cancelled = false;
     void window.flow.invoke("flow:models.list", {}).then((result) => {
       if (cancelled) return;
@@ -115,7 +157,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [state.settings?.keySet, screen, modelEpoch]);
+  }, [state.settings?.keySet, modelsScreen, modelEpoch]);
 
   useEffect(() => {
     if (screen !== "home") return;
@@ -356,6 +398,19 @@ export function App() {
     if (settings.ok) dispatch({ type: "settings", settings: settings.value, repos: stateRef.current.repos });
   }
 
+  async function jiraUpdate(
+    run: () => Promise<Result<JiraStatus>>,
+  ): Promise<boolean> {
+    setJiraMessage(null);
+    const result = await run();
+    if (!result.ok) {
+      setJiraMessage(result.error.message);
+      return false;
+    }
+    setJira(result.value);
+    return true;
+  }
+
   async function pickFolder(): Promise<void> {
     bootHold.current.hold = true;
     setPending(true);
@@ -482,6 +537,7 @@ export function App() {
         onReset={() => void resetChat(repoName)}
         onSetup={() => dispatch({ type: "edit-setup" })}
         onInstructions={() => dispatch({ type: "open-instructions" })}
+        onJira={hasSidebar ? null : () => dispatch({ type: "open-jira" })}
         onDismiss={() => dispatch({ type: "dismiss-banner", repo: repoName })}
         onRetry={() => retryFor(repoName)}
         onBannerSetup={() => dispatch({ type: "edit-setup" })}
@@ -519,6 +575,20 @@ export function App() {
       onSend={() => void sendHome()}
     />
   );
+  const jiraSetup: JiraSetupProps = {
+    status: jira,
+    message: jiraMessage,
+    onSave: (input) =>
+      jiraUpdate(() => window.flow.invoke("flow:jira.save", input)),
+    onClear: () => jiraUpdate(() => window.flow.invoke("flow:jira.clear", {})),
+  };
+  const jiraPane = (
+    <JiraTickets
+      status={jira}
+      onBack={() => dispatch({ type: "close-jira" })}
+      onSetup={() => dispatch({ type: "edit-setup" })}
+    />
+  );
 
   return (
     <div className="app">
@@ -549,20 +619,41 @@ export function App() {
             onModel={(model) => saveSettings({ model })}
             onTheme={(theme) => void saveSettings({ theme })}
             onMode={(mode) => void saveSettings({ mode })}
-            onBack={settings.setupComplete ? () => dispatch({ type: "close-setup" }) : null}
+            onBack={
+              settings.setupComplete
+                ? () => {
+                    setJiraMessage(null);
+                    dispatch({ type: "close-setup" });
+                  }
+                : null
+            }
+            backLabel={state.jiraOpen ? "Back to tickets" : "Back to chat"}
+            jira={jiraSetup}
           />
         </>
-      ) : state.repos.length > 1 ? (
+      ) : hasSidebar ? (
         <div className="shell">
           <RepoSidebar
             rows={sidebarRows(state)}
             pending={pending}
+            jiraActive={state.jiraOpen}
             onOpen={(name) => void openChat(name)}
             onNew={() => dispatch({ type: "open-home" })}
+            onJira={() => dispatch({ type: "open-jira" })}
             onRemove={(name) => void resetChat(name)}
           />
-          {screen === "home" ? home : screen === "instructions" && repo !== null ? instructionsPane(repo) : repo !== null ? chatPane(repo, settings) : null}
+          {screen === "jira"
+            ? jiraPane
+            : screen === "home"
+              ? home
+              : screen === "instructions" && repo !== null
+                ? instructionsPane(repo)
+                : repo !== null
+                  ? chatPane(repo, settings)
+                  : null}
         </div>
+      ) : screen === "jira" ? (
+        jiraPane
       ) : screen === "instructions" && repo !== null ? (
         instructionsPane(repo)
       ) : repo !== null ? (

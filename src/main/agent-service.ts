@@ -11,10 +11,11 @@ import {
   type SDKMessage,
   type SendOptions,
 } from "@cursor/sdk";
-import { PLAN_TEXT_MAX, type AgentMode } from "../shared/ipc.js";
+import { PLAN_TEXT_MAX, type AgentMode, type Subagent } from "../shared/ipc.js";
 import { isCreatePlan } from "../shared/plan-markdown.js";
 import { parseToolQuestion, QuestionRejected, type AskUser } from "../shared/questions.js";
-import { toolDetail } from "./tool-summary.js";
+import { isTask } from "../shared/task.js";
+import { taskActivity, taskFields, toolDetail } from "./tool-summary.js";
 
 const RESUME_TIMEOUT_MS = 10_000;
 
@@ -47,6 +48,7 @@ export type AgentStreamEvent =
       summary: string;
       plan?: string;
       truncated?: boolean;
+      subagent?: Subagent;
     }
   | { type: "done"; stopReason: "end" | "stopped" }
   | { type: "error"; code: "auth" | "agent_error"; message: string; retryable: boolean };
@@ -149,12 +151,31 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
     const current = holder;
     if (current === null) throw new AgentCallError("agent_error", "The agent is not open", true);
     if (cancelRequested) throw new Cancelled();
+    const activities = new Map<string, string>();
+    const finished = new Set<string>();
     let run: Run;
     try {
       run = await current.agent.send(input.prompt, {
         model: { id: input.modelId },
         mode: input.mode,
         local: { customTools: questionTools(hooks.ask) },
+        // The run stream drops nested task updates. onDelta is how the card learns what the subagent is doing.
+        onDelta: ({ update }) => {
+          const next = taskActivity(update, current.cwd);
+          if (next === null || finished.has(next.callId)) return;
+          const previous = activities.get(next.callId);
+          if (previous === next.line) return;
+          if (previous !== undefined && !next.replace) return;
+          activities.set(next.callId, next.line);
+          input.onEvent({
+            type: "tool",
+            toolCallId: next.callId,
+            name: "task",
+            status: "running",
+            summary: "",
+            subagent: { activity: next.line },
+          });
+        },
       });
     } catch (error) {
       throw translate(error, input.apiKey);
@@ -164,7 +185,7 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
       throw new Cancelled();
     }
     activeRun = run;
-    void consume(run, input.apiKey, current.cwd, input.onEvent).finally(() => {
+    void consume(run, input.apiKey, current.cwd, input.onEvent, activities, finished).finally(() => {
       if (activeRun === run) activeRun = null;
     });
   }
@@ -303,14 +324,22 @@ async function resumeWithTimeout(agentId: string, options: AgentOptions, ms: num
   });
 }
 
-async function consume(run: Run, secret: string, cwd: string, onEvent: (event: AgentStreamEvent) => void): Promise<void> {
+async function consume(
+  run: Run,
+  secret: string,
+  cwd: string,
+  onEvent: (event: AgentStreamEvent) => void,
+  activities: ReadonlyMap<string, string>,
+  finished: Set<string>,
+): Promise<void> {
   let accumulated = "";
   try {
     for await (const message of run.stream()) {
       emitMessage(message, accumulated, cwd, (next, event) => {
         accumulated = next;
+        if (event?.type === "tool" && isTask(event.name) && event.status !== "running") finished.add(event.toolCallId);
         if (event) onEvent(event);
-      });
+      }, activities);
     }
     const result = await run.wait();
     if (result.status === "cancelled") {
@@ -342,6 +371,7 @@ export function emitMessage(
   accumulated: string,
   cwd: string,
   emit: (accumulated: string, event: AgentStreamEvent | null) => void,
+  activities?: ReadonlyMap<string, string>,
 ): void {
   if (message.type === "assistant") {
     let next = accumulated;
@@ -359,15 +389,33 @@ export function emitMessage(
   if (isQuestionTool(name, message.args) || isQuestionTool(name, message.result)) return;
   const toolCallId = message.call_id.trim() === "" ? `${name}-call` : message.call_id;
   const status = message.status === "completed" ? "ok" : message.status === "error" ? "error" : "running";
-  const summary = isCreatePlan(name) ? planSummary(status) : toolDetail(message.args, cwd, name);
+  const task = isTask(name) ? taskFields(message.args) : null;
+  const summary = isCreatePlan(name) ? planSummary(status) : task !== null ? task.description : toolDetail(message.args, cwd, name);
+  const activity = activities?.get(toolCallId);
   emit(accumulated, {
     type: "tool",
     toolCallId,
     name,
     status,
     summary,
+    ...subagentFields(name, task, activity),
     ...planFields(name, message),
   });
+}
+
+function subagentFields(
+  name: string,
+  task: { description: string; model?: string } | null,
+  activity: string | undefined,
+): { subagent?: Subagent } {
+  if (!isTask(name)) return {};
+  const subagent: Subagent = {
+    ...(task !== null ? { description: task.description } : {}),
+    ...(task?.model !== undefined ? { model: task.model } : {}),
+    ...(activity !== undefined && activity !== "" ? { activity } : {}),
+  };
+  if (subagent.description === undefined && subagent.model === undefined && subagent.activity === undefined) return {};
+  return { subagent };
 }
 
 function planSummary(status: "running" | "ok" | "error"): string {

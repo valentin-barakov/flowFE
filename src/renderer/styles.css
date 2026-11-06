@@ -308,7 +308,55 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-line[data-phase="stopped"] .tool-dot { background: var(--muted); }
 .tool-line[data-phase="running"] .tool-dot { animation: tool-pulse 1s ease-in-out infinite; }
 @keyframes tool-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .tool-line[data-phase="running"] .tool-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .tool-line[data-phase="running"] .tool-dot,
+  .subagent-card[data-phase="running"] .tool-dot { animation: none; }
+}
+.subagent-card {
+  max-width: 720px;
+  margin: 8px 0 8px 42px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+}
+.subagent-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+.subagent-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.subagent-model { font-size: 12px; color: var(--muted); }
+.subagent-activity, .subagent-status {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.subagent-card[data-phase="running"] .tool-dot { animation: tool-pulse 1s ease-in-out infinite; }
+.subagent-card[data-phase="finished"] .tool-dot { background: var(--ok); }
+.subagent-card[data-phase="failed"] .tool-dot { background: var(--danger); }
+.subagent-card[data-phase="stopped"] .tool-dot { background: var(--muted); }
+.subagent-card[data-phase="running"] .subagent-status { color: var(--info); }
+.subagent-card[data-phase="failed"] .subagent-status { color: var(--danger); }
 .tool-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-weight: 600; color: var(--ink); }
 .tool-detail {
   min-width: 0;
@@ -603,3 +651,110 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
   box-shadow: var(--shadow);
 }
 .shell > .chat, .shell > .editor, .shell > .home { flex: 1; min-width: 0; }
+.btn[aria-pressed="true"],
+.btn[aria-current="page"] {
+  background: var(--soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tickets {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tickets-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tickets-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.tickets-head .titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tickets-head .spacer {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.tickets-notice {
+  margin: 0;
+  padding: 8px 16px 0;
+}
+.tickets-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+}
+.tickets-empty {
+  margin: 48px auto;
+  max-width: 420px;
+  text-align: center;
+  color: var(--muted);
+}
+.tickets-empty p {
+  margin: 0 0 12px;
+}
+.ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ticket {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 10px;
+}
+.ticket:hover {
+  border-color: var(--accent);
+}
+.ticket-key {
+  font-weight: 650;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.ticket-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-meta {
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ticket-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+.setup-notes code {
+  font-size: 12px;
+  user-select: all;
+}

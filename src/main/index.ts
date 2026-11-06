@@ -1,11 +1,12 @@
 // Electron main process entry. Do not await app.whenReady() at the top level: Electron loads this
 // module before it emits ready, so that await never finishes and the app hangs with no window.
-import { app, BrowserWindow, nativeImage, safeStorage } from "electron";
+import { app, BrowserWindow, nativeImage, safeStorage, shell } from "electron";
 import { existsSync, renameSync } from "node:fs";
 import path from "node:path";
 import { QuestionRejected, QUESTION_CANCELLED } from "../shared/questions.js";
 import { createAgentService } from "./agent-service.js";
 import { publish, registerIpc, type IpcHost } from "./ipc.js";
+import { createJiraService } from "./jira-service.js";
 import { createRulesSkills } from "./rules-skills-service.js";
 import { createSessionManager } from "./session-manager.js";
 import { createSettingsStore } from "./settings-store.js";
@@ -50,6 +51,12 @@ function start(): void {
   applyDockIcon();
   const store = createSettingsStore({ userDataDir: app.getPath("userData"), secrets: safeStorage });
   const files = createRulesSkills();
+  const jira = createJiraService({
+    userDataDir: app.getPath("userData"),
+    secrets: safeStorage,
+    // Only https://<site>.atlassian.net/browse/<KEY>, built in jira-service, reaches this function.
+    openExternal: (url) => shell.openExternal(url),
+  });
   const models = createAgentService({
     ask() {
       return Promise.reject(new QuestionRejected("cancelled", QUESTION_CANCELLED));
@@ -62,7 +69,7 @@ function start(): void {
     listModels: (key) => models.listModels(key),
     createAgents: (ask) => createAgentService({ ask }),
   });
-  registerIpc(host, manager, files);
+  registerIpc(host, manager, files, jira);
   attach(createMainWindow(distDir));
   app.on("activate", () => {
     if (host.window === null) attach(createMainWindow(distDir));

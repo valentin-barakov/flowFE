@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { emitMessage, type AgentStreamEvent } from "../src/main/agent-service.ts";
-import { toolDetail } from "../src/main/tool-summary.ts";
+import { taskActivity, taskFields, toolDetail } from "../src/main/tool-summary.ts";
+import { mergeSubagent } from "../src/shared/task.ts";
 
 const cwd = "/w/repo";
 
@@ -70,6 +71,43 @@ test("an mcp call shows the server and the tool", () => {
   assert.equal(toolDetail({ serverIdentifier: "user-Figma", toolName: "get_screenshot" }, cwd, "mcp"), "user-Figma get_screenshot");
   assert.equal(toolDetail({ toolName: "search" }, cwd, "mcp"), "search");
   assert.equal(toolDetail({ name: "linear", toolName: "list_issues" }, cwd, "mcp"), "linear list_issues");
+});
+
+test("a task call keeps the description and the model, not the prompt", () => {
+  const events = eventsFor("task", {
+    description: "Implement Jira steps 1-2",
+    prompt: "do the work",
+    model: "grok-4.7",
+  });
+  assert.equal(events.length, 1);
+  const event = events[0];
+  assert.equal(event?.type, "tool");
+  if (event?.type !== "tool") return;
+  assert.equal(event.summary, "Implement Jira steps 1-2");
+  assert.deepEqual(event.subagent, { description: "Implement Jira steps 1-2", model: "grok-4.7" });
+  assert.equal(JSON.stringify(event).includes("do the work"), false);
+});
+
+test("a nested tool update becomes the activity line, and thinking does not replace it", () => {
+  const read = taskActivity(
+    { type: "tool-call-delta", callId: "call", taskUpdate: { type: "tool-call-started", toolCall: { type: "read", args: { path: "/w/repo/docs/plan.md" } } } },
+    cwd,
+  );
+  assert.deepEqual(read, { callId: "call", line: "Read docs/plan.md", replace: true });
+  const thinking = taskActivity({ type: "tool-call-delta", callId: "call", taskUpdate: { type: "thinking-delta" } }, cwd);
+  assert.deepEqual(thinking, { callId: "call", line: "Thinking", replace: false });
+  assert.equal(taskActivity({ type: "text-delta", callId: "call" }, cwd), null);
+  assert.deepEqual(taskFields({ description: "Implement Jira steps 1-2", prompt: "secret" }), {
+    description: "Implement Jira steps 1-2",
+  });
+});
+
+test("a later activity keeps the description already on the card", () => {
+  assert.deepEqual(mergeSubagent({ description: "Implement Jira steps 1-2", model: "grok" }, { activity: "Read docs/plan.md" }), {
+    description: "Implement Jira steps 1-2",
+    model: "grok",
+    activity: "Read docs/plan.md",
+  });
 });
 
 test("a long command is cut at 160 characters", () => {

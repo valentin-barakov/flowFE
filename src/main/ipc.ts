@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { COMMANDS, failure, type CommandChannel, type FlowEvent, type InputOf, type OutputOf, type Result } from "../shared/ipc.js";
 import type { SessionManager } from "./session-manager.js";
 import { SessionError } from "./chat-session.js";
+import { JiraError, type JiraService } from "./jira-service.js";
 import type { RulesSkills } from "./rules-skills-service.js";
 import { FilesError } from "./rules-skills-service.js";
 
@@ -12,7 +13,7 @@ export type IpcHost = {
   senderId: number;
 };
 
-export function registerIpc(host: IpcHost, manager: SessionManager, files: RulesSkills): void {
+export function registerIpc(host: IpcHost, manager: SessionManager, files: RulesSkills, jira: JiraService): void {
   const channels = Object.keys(COMMANDS) as CommandChannel[];
   for (const channel of channels) {
     ipcMain.handle(channel, async (event, input: unknown): Promise<Result<OutputOf<typeof channel>>> => {
@@ -22,13 +23,14 @@ export function registerIpc(host: IpcHost, manager: SessionManager, files: Rules
       const parsed = COMMANDS[channel].input.safeParse(input);
       if (!parsed.success) return failure("invalid_input", issueMessage(parsed.error), false);
       try {
-        const value = await run(channel, parsed.data, host, manager, files);
+        const value = await run(channel, parsed.data, host, manager, files, jira);
         const checked = COMMANDS[channel].output.safeParse(value);
         if (!checked.success) return failure("io_error", "The app sent a bad response", false);
         return { ok: true, value: checked.data };
       } catch (error) {
         if (error instanceof SessionError) return failure(error.code, error.message, error.retryable);
         if (error instanceof FilesError) return failure(error.code, error.message, error.retryable);
+        if (error instanceof JiraError) return failure(error.code, error.message, error.retryable);
         return failure("io_error", "Something went wrong", false);
       }
     });
@@ -47,6 +49,7 @@ async function run<C extends CommandChannel>(
   host: IpcHost,
   manager: SessionManager,
   files: RulesSkills,
+  jira: JiraService,
 ): Promise<OutputOf<C>> {
   switch (channel) {
     case "flow:settings.get":
@@ -135,6 +138,23 @@ async function run<C extends CommandChannel>(
       const body = input as InputOf<"flow:agentsmd.write">;
       return files.writeAgents(manager.repoPath(body.repo), body.body) as OutputOf<C>;
     }
+    case "flow:jira.status":
+      return jira.status() as OutputOf<C>;
+    case "flow:jira.save": {
+      const body = input as InputOf<"flow:jira.save">;
+      return jira.saveAccount({
+        email: body.email,
+        site: body.site,
+        ...(body.token !== undefined ? { token: body.token } : {}),
+      }) as OutputOf<C>;
+    }
+    case "flow:jira.clear":
+      return jira.clear() as OutputOf<C>;
+    case "flow:jira.issues":
+      return (await jira.issues(input as InputOf<"flow:jira.issues">)) as OutputOf<C>;
+    case "flow:jira.open":
+      await jira.open((input as InputOf<"flow:jira.open">).key);
+      return {} as OutputOf<C>;
     default:
       return assertNever(channel);
   }

@@ -1,9 +1,25 @@
-// settings.json, chats/<folderId>.json, and the encrypted key. One writer. Temp file, then rename.
+// settings.json, chats/<folderId>.json, and the encrypted key.
+// Writes go through writeAtomic in atomic-write.ts (temp file, mode 0600, then rename).
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  type Dirent,
+} from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { MessageSchema, type AgentMode, type Message, type Settings, type Theme } from "../shared/ipc.js";
+import { writeAtomic } from "./atomic-write.js";
+import {
+  MessageSchema,
+  type AgentMode,
+  type Message,
+  type Settings,
+  type Theme,
+} from "../shared/ipc.js";
 
 export type SecretBox = {
   isEncryptionAvailable(): boolean;
@@ -277,15 +293,6 @@ function isAgentIdOnly(value: unknown): boolean {
 
 function writeBytes(file: string, data: Buffer): void {
   writeAtomic(file, data);
-}
-
-function writeAtomic(file: string, data: string | Buffer): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, data, { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
-  chmodSync(file, 0o600);
 }
 
 function quarantine(file: string): void {

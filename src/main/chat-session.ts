@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { busyRepoMessage, type Answers, type ChatStateName, type FlowEvent, type Message, type PendingQuestion } from "../shared/ipc.js";
+import { mergeSubagent } from "../shared/task.js";
 import {
   QUESTION_BUSY,
   QUESTION_CANCELLED,
@@ -344,6 +345,7 @@ export function createRepoSession(options: {
         offset,
         ...(event.plan !== undefined ? { plan: event.plan } : {}),
         ...(event.truncated === true ? { truncated: true } : {}),
+        ...(event.subagent !== undefined ? { subagent: event.subagent } : {}),
       });
       if (event.status !== "running") persistTool(current, event, offset);
       return;
@@ -375,17 +377,20 @@ export function createRepoSession(options: {
       offset,
       ...(event.plan !== undefined ? { plan: event.plan } : {}),
       ...(event.truncated === true ? { truncated: true } : {}),
+      ...(event.subagent !== undefined ? { subagent: event.subagent } : {}),
     };
     const existing = chat.messages.some((message) => message.id === event.toolCallId);
     const messages: Message[] = existing
       ? chat.messages.map((message): Message => {
           if (message.id !== event.toolCallId || message.role !== "tool") return message;
+          const subagent = mergeSubagent(message.subagent, event.subagent);
           return {
             id: message.id,
             role: "tool",
             at: message.at,
             ...saved,
             summary: event.summary !== "" ? event.summary : message.summary,
+            ...(subagent !== undefined ? { subagent } : {}),
           };
         })
       : insertTool(chat.messages, agentMessageId, {

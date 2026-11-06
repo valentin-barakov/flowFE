@@ -4,12 +4,14 @@ import type { SidebarRow } from "./state.js";
 type RepoSidebarProps = {
   rows: SidebarRow[];
   pending: boolean;
+  jiraActive: boolean;
   onOpen: (name: string) => void;
   onNew: () => void;
+  onJira: () => void;
   onRemove: (name: string) => void;
 };
 
-export function RepoSidebar({ rows, pending, onOpen, onNew, onRemove }: RepoSidebarProps) {
+export function RepoSidebar({ rows, pending, jiraActive, onOpen, onNew, onJira, onRemove }: RepoSidebarProps) {
   const [confirmName, setConfirmName] = useState<string | null>(null);
   const confirming = rows.find((row) => row.name === confirmName) ?? null;
   const confirmBlocked = confirming === null || confirming.status === "running" || confirming.status === "waiting" || pending;
@@ -18,6 +20,9 @@ export function RepoSidebar({ rows, pending, onOpen, onNew, onRemove }: RepoSide
     <aside className="sidebar">
       <button type="button" className="btn" onClick={onNew}>
         New chat
+      </button>
+      <button type="button" className="btn" aria-current={jiraActive ? "page" : undefined} onClick={onJira}>
+        Jira
       </button>
       <ul className="repo-list">
         {rows.map((row) => {

@@ -28,7 +28,8 @@ type ErrorCode =
 - The `flow:chat.state` command omits `runId` when no run is active. While a run is active, that command and the events use that run's id. A `chat.state` event uses `runId` `"session"` when nothing is running.
 - The renderer applies every `chat.state` event. It ignores any other event for a run that `chat.done` or `chat.error` already sealed, and any event whose `runId` differs from the run that is currently active.
 - Commands that touch a chat, a question, rules, skills, or `AGENTS.md` take `repo`. `repo` is `.` when the workspace folder is the only repo, otherwise a direct child directory name. Main resolves it against the scanned repo list. An unknown name returns `not_found`. No command returns a repo path.
-- No command returns the API key, the `agentId`, or a path outside the chosen folder.
+- No command returns the API key, the `agentId`, the Jira API token, or a path outside the chosen folder. `flow:jira.status` and `flow:jira.save` return the email, the site origin, and `tokenSet`.
+- A Jira failure uses the same `ErrorCode` values. The window shows it inside the Jira pane or Setup, not in the Cursor key banner.
 
 ## Commands
 
@@ -58,6 +59,11 @@ type ErrorCode =
 | `flow:skills.read` | `{ repo, name }` | `Skill` | |
 | `flow:skills.write` | `{ repo, name, description, body }` | `Skill` | Creates or overwrites `.cursor/skills/<name>/SKILL.md` |
 | `flow:skills.delete` | `{ repo, name }` | `{}` | Removes the skill folder. The UI confirms first |
+| `flow:jira.status` | none | `{ email, site, tokenSet }` | `email` and `site` are null until saved. `site` is an origin such as `https://acme.atlassian.net`. `tokenSet` is a boolean. The token is never returned |
+| `flow:jira.save` | `{ email, site, token? }` | status | `email` is trimmed, 3 to 200 characters, and must contain `@`. `site` is trimmed, 1 to 200 characters, then checked: `https`, host `<name>.atlassian.net`, no port, no user info. A path is dropped. `token`, when present, is trimmed, then 1 to 500 characters. Omitted `token` keeps the stored one. `not_ready` when no token is stored and none was sent. `invalid_input` for a bad site. `io_error` when this Mac cannot encrypt |
+| `flow:jira.clear` | none | status | Writes an empty record over `jira.bin`. Email, site, and token are gone |
+| `flow:jira.issues` | `{ pageToken? }` | `{ issues: { key, summary, status, type, project, updated }[], nextPageToken? }` | Issues assigned to the account whose status category is not Done, newest update first, 50 per page. `pageToken` is Jira's opaque `nextPageToken`, sent back only to turn the page. `not_ready` when email, site, or token is missing. `auth` on HTTP 401 or 403, and the saved token is kept. `not_found` on HTTP 404 |
+| `flow:jira.open` | `{ key }` | `{}` | `key` must match `^[A-Z][A-Z0-9_]{1,49}-[0-9]{1,9}$`. Main opens `https://<site>.atlassian.net/browse/<key>` in the system browser. The window cannot pass a URL |
 
 `AGENTS.md` is not a rule or a skill. `flow:agentsmd.read` takes `{ repo }` and returns `{ body }`. `flow:agentsmd.write` takes `{ repo, body }` of at most 200 000 characters and returns `{ body }`. An empty body writes an empty file.
 
@@ -77,7 +83,7 @@ All events arrive on `flow:event` with a `type` discriminator and a `runId`. Eve
 |--------|---------|---------|
 | `chat.state` | `{ state }` | The state machine changed |
 | `chat.delta` | `{ messageId, text }` | Append `text` to the agent message |
-| `chat.tool` | `{ toolCallId, name, status: "running" \| "ok" \| "error", summary, offset?, plan?, truncated? }` | A tool line; the same id updates its status. `summary` is one short line built from the call's arguments (a path relative to the repo, a command, or a search pattern); it is empty when the arguments have no known key. The `ask_user_question` call has no tool line, because its question card is shown instead. `offset` is the number of characters of the agent message that existed when this call first appeared; later events for the same id repeat it. The window uses it to show text, tool calls, and cards in the order they happened. `plan` is the `createPlan` markdown, at most 200000 characters. `truncated` is true when that text was cut |
+| `chat.tool` | `{ toolCallId, name, status: "running" \| "ok" \| "error", summary, offset?, plan?, truncated?, subagent? }` | A tool line; the same id updates its status. `summary` is one short line built from the call's arguments (a path relative to the repo, a command, or a search pattern); it is empty when the arguments have no known key. The `ask_user_question` call has no tool line, because its question card is shown instead. A `task` call is drawn as a subagent card. `subagent` carries `description` (at most 200 characters), `model`, and `activity` (the latest nested tool, at most 160 characters). An activity update may repeat the same id with only `activity` set; the window keeps the description it already has. `offset` is the number of characters of the agent message that existed when this call first appeared; later events for the same id repeat it. The window uses it to show text, tool calls, and cards in the order they happened. `plan` is the `createPlan` markdown, at most 200000 characters. `truncated` is true when that text was cut |
 | `chat.done` | `{ messageId, stopReason: "end" \| "stopped" }` | The run finished |
 | `chat.error` | `{ code, message, retryable }` | The run failed. The state returns to `ready`, or to `needsSetup` when setup is no longer complete |
 | `question.asked` | `{ questionId, title?, questions: Question[], offset? }` | Show the form. `offset` is the number of characters of the agent message that existed when the question was asked, so the form sits under the text written before it |

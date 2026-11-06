@@ -1,9 +1,21 @@
-import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Question, RepoListItem, Settings } from "../shared/ipc.js";
+import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Question, RepoListItem, Settings, Subagent } from "../shared/ipc.js";
+import { mergeSubagent } from "../shared/task.js";
 
 export type Item =
   | { id: string; role: "user"; text: string; at: string }
   | { id: string; role: "agent"; text: string; at: string; status: "done" | "stopped" | "interrupted" | "error" }
-  | { id: string; role: "tool"; name: string; summary: string; status: "running" | "ok" | "error"; at: string; plan?: string; truncated?: boolean; offset?: number }
+  | {
+      id: string;
+      role: "tool";
+      name: string;
+      summary: string;
+      status: "running" | "ok" | "error";
+      at: string;
+      plan?: string;
+      truncated?: boolean;
+      subagent?: Subagent;
+      offset?: number;
+    }
   | {
       id: string;
       role: "question";
@@ -53,6 +65,8 @@ export type AppState = {
   models: ModelChoice[];
   modelsError: string | null;
   instructionsOpen: boolean;
+  /** The Jira ticket list replaces the main pane. `view` and `instructionsOpen` stay as they were. */
+  jiraOpen: boolean;
   view: View;
   repos: RepoListItem[];
   chats: Record<string, ChatSlice>;
@@ -93,8 +107,17 @@ export function sidebarRows(state: AppState): SidebarRow[] {
   const rows: SidebarRow[] = [];
   for (const row of state.repos) {
     const slice = state.chats[row.name];
-    const active = state.view.kind === "repo" && state.view.repo === row.name;
-    if (!active && !row.hasHistory && !isBusyState(row.state) && slice?.unseen !== true && slice?.banner == null) continue;
+    const current = state.view.kind === "repo" && state.view.repo === row.name;
+    // While the Jira list is open no row looks selected, but the chat underneath keeps its row.
+    const active = current && !state.jiraOpen;
+    if (
+      !current &&
+      !row.hasHistory &&
+      !isBusyState(row.state) &&
+      slice?.unseen !== true &&
+      slice?.banner == null
+    )
+      continue;
     let status: SidebarRow["status"] = "idle";
     if (row.state === "awaitingAnswer") status = "waiting";
     else if (row.state === "streaming" || row.state === "stopping") status = "running";
@@ -173,6 +196,8 @@ export type Action =
   | { type: "close-setup" }
   | { type: "open-instructions" }
   | { type: "close-instructions" }
+  | { type: "open-jira" }
+  | { type: "close-jira" }
   | { type: "open-home" }
   | { type: "open-repo"; repo: string }
   | {
@@ -215,6 +240,7 @@ export const initialState: AppState = {
   models: [],
   modelsError: null,
   instructionsOpen: false,
+  jiraOpen: false,
   view: { kind: "home" },
   repos: [],
   chats: {},
@@ -286,14 +312,27 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, instructionsOpen: true };
     case "close-instructions":
       return { ...state, instructionsOpen: false };
+    case "open-jira":
+      return { ...state, jiraOpen: true };
+    case "close-jira": {
+      if (!state.jiraOpen) return state;
+      const underneath = state.view.kind === "repo" ? state.view.repo : null;
+      const slice = underneath === null ? undefined : state.chats[underneath];
+      return {
+        ...state,
+        jiraOpen: false,
+        chats: underneath !== null && slice !== undefined ? { ...state.chats, [underneath]: { ...slice, unseen: false } } : state.chats,
+      };
+    }
     case "open-home":
-      return { ...state, view: { kind: "home" }, instructionsOpen: false };
+      return { ...state, view: { kind: "home" }, instructionsOpen: false, jiraOpen: false };
     case "open-repo": {
       const current = state.chats[action.repo] ?? emptySlice();
       return {
         ...state,
         view: { kind: "repo", repo: action.repo },
         instructionsOpen: false,
+        jiraOpen: false,
         chats: { ...state.chats, [action.repo]: { ...current, unseen: false } },
       };
     }
@@ -436,9 +475,10 @@ export function reducer(state: AppState, action: Action): AppState {
   }
 }
 
-export function screenOf(state: AppState): "loading" | "setup" | "instructions" | "home" | "chat" {
+export function screenOf(state: AppState): "loading" | "setup" | "jira" | "instructions" | "home" | "chat" {
   if (!state.booted || state.settings === null) return "loading";
   if (!state.settings.setupComplete || state.editing) return "setup";
+  if (state.jiraOpen) return "jira";
   if (state.instructionsOpen && state.view.kind === "repo") return "instructions";
   if (state.view.kind === "home") return "home";
   return "chat";
@@ -461,6 +501,7 @@ export function toItems(messages: readonly Message[], openQuestionId: string | n
           at: message.at,
           ...(message.plan !== undefined ? { plan: message.plan } : {}),
           ...(message.truncated === true ? { truncated: true } : {}),
+          ...(message.subagent !== undefined ? { subagent: message.subagent } : {}),
           ...(message.offset !== undefined ? { offset: message.offset } : {}),
         };
       case "question":
@@ -517,6 +558,7 @@ function applyEvent(state: ChatSlice, event: FlowEvent): ChatSlice {
       at: new Date().toISOString(),
       ...(event.plan !== undefined ? { plan: event.plan } : {}),
       ...(event.truncated === true ? { truncated: true } : {}),
+      ...(event.subagent !== undefined ? { subagent: event.subagent } : {}),
       ...(event.offset !== undefined ? { offset: event.offset } : {}),
     };
     return {
@@ -560,7 +602,10 @@ function routeEvent(state: AppState, event: FlowEvent): AppState {
   const applied = applyEvent(current, event);
   if (applied === current) return state;
   let slice = applied;
-  const onScreen = state.view.kind === "repo" && state.view.repo === event.repo;
+  const onScreen =
+    state.view.kind === "repo" &&
+    state.view.repo === event.repo &&
+    !state.jiraOpen;
   if (!onScreen && (event.type === "chat.done" || event.type === "chat.error" || event.type === "question.asked")) {
     slice = { ...slice, unseen: true };
   }
@@ -610,9 +655,10 @@ function upsertTool(items: readonly Item[], agentId: string | null, tool: Extrac
         ...current,
         name: tool.name,
         summary: tool.summary !== "" ? tool.summary : current.summary,
-        status: tool.status,
+        status: current.status !== "running" && tool.status === "running" ? current.status : tool.status,
         ...(tool.plan !== undefined ? { plan: tool.plan } : {}),
         ...(tool.truncated === true ? { truncated: true } : {}),
+        ...mergedSubagent(current.subagent, tool.subagent),
         ...(current.offset === undefined && tool.offset !== undefined ? { offset: tool.offset } : {}),
       };
     }
@@ -621,6 +667,11 @@ function upsertTool(items: readonly Item[], agentId: string | null, tool: Extrac
   const agentIndex = agentId === null ? -1 : items.findIndex((item) => item.id === agentId);
   if (agentIndex === -1) return [...items, tool];
   return [...items.slice(0, agentIndex), tool, ...items.slice(agentIndex)];
+}
+
+function mergedSubagent(current: Subagent | undefined, next: Subagent | undefined): { subagent?: Subagent } {
+  const subagent = mergeSubagent(current, next);
+  return subagent !== undefined ? { subagent } : {};
 }
 
 export function bannerFor(code: string, message: string, retryable: boolean): Banner {

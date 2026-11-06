@@ -1,8 +1,8 @@
 // Checks how one run's text and tool calls are put in order. No network, no Electron, no React.
-//   node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/segments-check.ts
+//   node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/segments-check.ts
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBlocks, cleanSummary, displayDetail, toolPhase, type Block } from "../src/renderer/segments.ts";
+import { buildBlocks, cleanSummary, displayDetail, subagentPhase, toolPhase, type Block } from "../src/renderer/segments.ts";
 import type { Item } from "../src/renderer/state.ts";
 
 const at = "2026-11-06T00:00:00.000Z";
@@ -126,6 +126,28 @@ test("read and edit rows show the file name, and other tools keep the full detai
   assert.equal(displayDetail("shell", "npm run typecheck"), "npm run typecheck");
   assert.equal(displayDetail("mcp", "github list_issues"), "github list_issues");
   assert.equal(displayDetail("read", '{"status":"success"}'), "");
+});
+
+test("a task call is its own card and does not join the tool strip", () => {
+  const task: Item = {
+    id: "t2",
+    role: "tool",
+    name: "task",
+    summary: "Implement Jira steps 1-2",
+    status: "running",
+    at,
+    offset: 0,
+    subagent: { description: "Implement Jira steps 1-2", model: "grok" },
+  };
+  const items = [user("u1"), tool("t1", 0), task, tool("t3", 0), agent("a1", "")];
+  assert.deepEqual(shape(buildBlocks(items)), ["user:u1", "tools:t1", "subagent:t2", "tools:t3", "text::h:l"]);
+});
+
+test("a live subagent says it is waiting, and a finished one says done", () => {
+  assert.deepEqual(subagentPhase("running", true), { phase: "running", label: "Waiting for subagent" });
+  assert.deepEqual(subagentPhase("running", false), { phase: "stopped", label: "stopped" });
+  assert.deepEqual(subagentPhase("ok", false), { phase: "finished", label: "done" });
+  assert.deepEqual(subagentPhase("error", true), { phase: "failed", label: "failed" });
 });
 
 test("a tool still stored as running is shown as stopped when the run is not live", () => {
