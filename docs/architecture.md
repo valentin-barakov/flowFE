@@ -47,6 +47,7 @@ flowchart TB
 | `ipc.ts` | Command registration, sender check, `input.parse`, result envelope | Call the SDK or touch files directly |
 | `settings-store.ts` | `settings.json`, chat files, the encrypted key (via an injected `safeStorage`) | Return the key to the renderer |
 | `rules-skills-service.ts` | Reading and writing rules, skills, `AGENTS.md` inside the allowlist | Touch any path outside it |
+| `sdk-binaries.ts` | `CURSOR_RIPGREP_PATH` and `CURSOR_TREE_SITTER_VENDOR_DIR`, set once at startup from the platform package | Import the SDK |
 | `agent-service.ts` | `Agent.create`, `Agent.resume`, `send`, stream mapping, cancel, dispose | Know about IPC or the UI |
 | `tool-summary.ts` | The one-line detail for a tool call: a repo-relative path, a command, or a pattern, taken from the call's arguments | Import the SDK or read the result of a call |
 | `session-manager.ts` | The repo map, lazy `AgentService` per repo, global busy checks, shutdown | Call the SDK itself |
@@ -106,8 +107,8 @@ No global state library. One reducer in `renderer/state.ts`. After load, the win
 ```text
 src/
   main/       index.ts, window.ts, ipc.ts, session-manager.ts, chat-session.ts,
-              agent-service.ts, tool-summary.ts, prompt.ts, rules-skills-service.ts,
-              settings-store.ts
+              agent-service.ts, sdk-binaries.ts, tool-summary.ts, prompt.ts,
+              rules-skills-service.ts, settings-store.ts
   preload/    index.ts, bridge.ts
   shared/     ipc.ts, questions.ts, mention.ts, plan-markdown.ts (exports isCreatePlan only)
   renderer/   main.tsx, App.tsx, state.ts, segments.ts, Setup.tsx, Chat.tsx, NewChat.tsx,
@@ -119,14 +120,15 @@ src/
 docs/         this folder
 scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts,
               mention-check.ts, repos-check.ts, plan-check.ts, segments-check.ts,
-              tool-summary-check.ts, packaged-sdk-check.mjs, after-pack.cjs
+              tool-summary-check.ts, sdk-binaries-check.ts, packaged-sdk-check.mjs,
+              after-pack.cjs
 ```
 
 `shared/` holds schemas, types, and question parsing: no I/O. `ipc.ts` is the command and event catalog. `questions.ts` is the ask-tool schema, answer checks, and the JSON returned to the agent. Main, preload, and renderer all import `shared/`.
 
 ## Packaging
 
-An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only, `identity: null`). `npm run dist` writes `release/mac-arm64/Mango.app`. `@cursor/sdk-darwin-*` is listed in `asarUnpack` because the SDK locates `bin/rg`, `bin/cursorsandbox`, and `vendor/**/binding.node` by walking up from the main script and spawning those files; they cannot run from inside `app.asar`. `scripts/after-pack.cjs` sets the executable bit on those unpacked `bin` files. `scripts/packaged-sdk-check.mjs` checks the unpacked tree, loads the tree-sitter `.node` files with the packaged binary, runs `rg --version`, and requires the `.app` to stay up for a few seconds (that startup imports `@cursor/sdk`). A full agent turn inside the packaged app is not part of the check, because that needs a key and a folder.
+An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only, `identity: null`). `npm run dist` writes `release/mac-arm64/Mango.app`. `@cursor/sdk-darwin-*` is listed in `asarUnpack` because `bin/rg`, `bin/cursorsandbox`, and `vendor/**/binding.node` cannot run from inside `app.asar`. The SDK looks for that package by walking up from `process.argv[1]` and from the Electron binary. Under Electron, `argv[1]` is the app directory, so the first walk starts at the parent and never enters `node_modules`. The walk from the Electron binary also skips a copy that sits inside the agent workspace. `src/main/sdk-binaries.ts` therefore sets `CURSOR_RIPGREP_PATH` and `CURSOR_TREE_SITTER_VENDOR_DIR` to the platform package before any agent is created. Those two variables are the SDK's own overrides. `scripts/after-pack.cjs` sets the executable bit on the unpacked `bin` files. `scripts/packaged-sdk-check.mjs` checks the unpacked tree, loads the tree-sitter `.node` files with the packaged binary, runs `rg --version`, and requires the `.app` to stay up for a few seconds (that startup imports `@cursor/sdk`). A full agent turn inside the packaged app is not part of the check, because that needs a key and a folder.
 
 ## Out of scope
 

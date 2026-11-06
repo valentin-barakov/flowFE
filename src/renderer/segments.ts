@@ -49,6 +49,16 @@ export function cleanSummary(summary: string): string {
   return text.startsWith("{") || text.startsWith("[") ? "" : text;
 }
 
+const FILE_TOOLS = new Set(["read", "edit", "write", "delete"]);
+
+/** Read and edit rows show the file name. The full path stays available as the title. */
+export function displayDetail(name: string, summary: string): string {
+  const text = cleanSummary(summary);
+  if (text === "" || !FILE_TOOLS.has(name.toLowerCase())) return text;
+  const slash = Math.max(text.lastIndexOf("/"), text.lastIndexOf("\\"));
+  return slash === -1 ? text : text.slice(slash + 1);
+}
+
 const TOOL_PHASE = {
   running: { phase: "running", label: "running" },
   ok: { phase: "finished", label: "done" },

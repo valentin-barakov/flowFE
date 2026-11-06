@@ -577,7 +577,7 @@ function upsertTool(items: readonly Item[], agentId: string | null, tool: Extrac
       next[index] = {
         ...current,
         name: tool.name,
-        summary: tool.summary,
+        summary: tool.summary !== "" ? tool.summary : current.summary,
         status: tool.status,
         ...(tool.plan !== undefined ? { plan: tool.plan } : {}),
         ...(tool.truncated === true ? { truncated: true } : {}),

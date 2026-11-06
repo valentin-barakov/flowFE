@@ -56,6 +56,22 @@ test("a question tool emits no tool event", () => {
   assert.deepEqual(eventsFor("read", { toolName: "ask_user_question" }), []);
 });
 
+test("a wrapped read or edit call shows the file path", () => {
+  assert.equal(toolDetail({ args: { path: "/w/repo/src/a.ts" } }, cwd, "read"), "src/a.ts");
+  assert.equal(toolDetail({ type: "edit", args: { path: "/w/repo/src/Chat.tsx" } }, cwd, "edit"), "src/Chat.tsx");
+  assert.equal(toolDetail({ fileName: "notes.md" }, cwd, "read"), "notes.md");
+});
+
+test("an mcp call shows the server and the tool", () => {
+  assert.equal(
+    toolDetail({ providerIdentifier: "github", toolName: "list_issues", args: { query: "bug" } }, cwd, "mcp"),
+    "github list_issues",
+  );
+  assert.equal(toolDetail({ serverIdentifier: "user-Figma", toolName: "get_screenshot" }, cwd, "mcp"), "user-Figma get_screenshot");
+  assert.equal(toolDetail({ toolName: "search" }, cwd, "mcp"), "search");
+  assert.equal(toolDetail({ name: "linear", toolName: "list_issues" }, cwd, "mcp"), "linear list_issues");
+});
+
 test("a long command is cut at 160 characters", () => {
   const detail = toolDetail({ command: "x".repeat(500) }, cwd);
   assert.equal(detail.length, 160);

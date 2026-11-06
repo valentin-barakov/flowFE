@@ -359,7 +359,7 @@ export function emitMessage(
   if (isQuestionTool(name, message.args) || isQuestionTool(name, message.result)) return;
   const toolCallId = message.call_id.trim() === "" ? `${name}-call` : message.call_id;
   const status = message.status === "completed" ? "ok" : message.status === "error" ? "error" : "running";
-  const summary = isCreatePlan(name) ? planSummary(status) : toolDetail(message.args, cwd);
+  const summary = isCreatePlan(name) ? planSummary(status) : toolDetail(message.args, cwd, name);
   emit(accumulated, {
     type: "tool",
     toolCallId,

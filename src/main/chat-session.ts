@@ -380,7 +380,13 @@ export function createRepoSession(options: {
     const messages: Message[] = existing
       ? chat.messages.map((message): Message => {
           if (message.id !== event.toolCallId || message.role !== "tool") return message;
-          return { id: message.id, role: "tool", at: message.at, ...saved };
+          return {
+            id: message.id,
+            role: "tool",
+            at: message.at,
+            ...saved,
+            summary: event.summary !== "" ? event.summary : message.summary,
+          };
         })
       : insertTool(chat.messages, agentMessageId, {
           id: event.toolCallId,

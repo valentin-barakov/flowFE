@@ -2,7 +2,7 @@
 //   node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/segments-check.ts
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBlocks, cleanSummary, toolPhase, type Block } from "../src/renderer/segments.ts";
+import { buildBlocks, cleanSummary, displayDetail, toolPhase, type Block } from "../src/renderer/segments.ts";
 import type { Item } from "../src/renderer/state.ts";
 
 const at = "2026-11-06T00:00:00.000Z";
@@ -117,6 +117,15 @@ test("a JSON summary from an old chat is hidden", () => {
   assert.equal(cleanSummary('{"status":"success"}'), "");
   assert.equal(cleanSummary("[1,2]"), "");
   assert.equal(cleanSummary("  src/a.ts "), "src/a.ts");
+});
+
+test("read and edit rows show the file name, and other tools keep the full detail", () => {
+  assert.equal(displayDetail("read", "src/renderer/Chat.tsx"), "Chat.tsx");
+  assert.equal(displayDetail("edit", "src/a.ts"), "a.ts");
+  assert.equal(displayDetail("Read", "notes.md"), "notes.md");
+  assert.equal(displayDetail("shell", "npm run typecheck"), "npm run typecheck");
+  assert.equal(displayDetail("mcp", "github list_issues"), "github list_issues");
+  assert.equal(displayDetail("read", '{"status":"success"}'), "");
 });
 
 test("a tool still stored as running is shown as stopped when the run is not live", () => {
