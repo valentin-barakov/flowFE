@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { BUSY_CAP_MESSAGE, MAX_BUSY_REPOS, busyRepoMessage, type Answers, type ChatStateName, type FlowEvent, type Settings, type Theme } from "../shared/ipc.js";
+import { BUSY_CAP_MESSAGE, MAX_BUSY_REPOS, busyRepoMessage, type AgentMode, type Answers, type ChatStateName, type FlowEvent, type Settings, type Theme } from "../shared/ipc.js";
 import { parseMention } from "../shared/mention.js";
 import { Chat } from "./Chat.js";
 import { Instructions } from "./Instructions.js";
@@ -55,6 +55,7 @@ export function App() {
           settings: {
             folder: null,
             model: null,
+            mode: "agent",
             theme: "system",
             keySet: false,
             folderMissing: false,
@@ -313,7 +314,7 @@ export function App() {
     dispatch({ type: "open-repo", repo });
   }
 
-  async function saveSettings(partial: { folder?: string; model?: string; theme?: Theme }): Promise<boolean> {
+  async function saveSettings(partial: { folder?: string; model?: string; mode?: AgentMode; theme?: Theme }): Promise<boolean> {
     setPending(true);
     const result = await window.flow.invoke("flow:settings.save", partial);
     setPending(false);
@@ -477,6 +478,7 @@ export function App() {
         workspaceBusy={anyBusy(state)}
         folder={current.folder ?? ""}
         model={current.model ?? ""}
+        mode={current.mode}
         models={state.models}
         theme={current.theme}
         items={slice.items}
@@ -495,6 +497,7 @@ export function App() {
         }}
         onStop={() => void stop()}
         onTheme={(theme) => void saveSettings({ theme })}
+        onMode={(mode) => void saveSettings({ mode })}
         onModel={(model) => saveSettings({ model })}
         onReset={() => void resetChat()}
         onSetup={() => dispatch({ type: "edit-setup" })}
@@ -565,6 +568,7 @@ export function App() {
             onPickFolder={pickFolder}
             onModel={(model) => saveSettings({ model })}
             onTheme={(theme) => void saveSettings({ theme })}
+            onMode={(mode) => void saveSettings({ mode })}
             onBack={settings.setupComplete ? () => dispatch({ type: "close-setup" }) : null}
           />
         </>

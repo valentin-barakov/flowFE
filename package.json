@@ -14,6 +14,9 @@
     "check:questions": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/phase3-questions-check.ts",
     "check:mentions": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/mention-check.ts",
     "check:repos": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/repos-check.ts",
+    "check:plan": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/plan-check.ts",
+    "check:tools": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/tool-summary-check.ts",
+    "check:segments": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/segments-check.ts",
     "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts && vite build --config vite.renderer.config.ts",
     "start": "npm run build && electron .",
     "dist": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 && node scripts/packaged-sdk-check.mjs",
@@ -31,6 +34,9 @@
     "@types/react-dom": "19.3.0",
     "electron": "45.2.1",
     "electron-builder": "26.18.0",
+    "mermaid": "12.3.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "typescript": "5.9.3",
     "vite": "8.3.5"
   }

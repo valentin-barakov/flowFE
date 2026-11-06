@@ -156,10 +156,11 @@ function issueMessage(error: ZodError): string {
   return error.issues[0]?.message ?? "Invalid input";
 }
 
-function saveInput(input: InputOf<"flow:settings.save">): { folder?: string; model?: string; theme?: "system" | "light" | "dark" } {
-  const partial: { folder?: string; model?: string; theme?: "system" | "light" | "dark" } = {};
+function saveInput(input: InputOf<"flow:settings.save">): { folder?: string; model?: string; mode?: "agent" | "plan"; theme?: "system" | "light" | "dark" } {
+  const partial: { folder?: string; model?: string; mode?: "agent" | "plan"; theme?: "system" | "light" | "dark" } = {};
   if (input.folder !== undefined) partial.folder = input.folder;
   if (input.model !== undefined) partial.model = input.model;
+  if (input.mode !== undefined) partial.mode = input.mode;
   if (input.theme !== undefined) partial.theme = input.theme;
   return partial;
 }

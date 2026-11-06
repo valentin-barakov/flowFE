@@ -3,7 +3,7 @@ import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Quest
 export type Item =
   | { id: string; role: "user"; text: string; at: string }
   | { id: string; role: "agent"; text: string; at: string; status: "done" | "stopped" | "interrupted" | "error" }
-  | { id: string; role: "tool"; name: string; summary: string; status: "running" | "ok" | "error"; at: string }
+  | { id: string; role: "tool"; name: string; summary: string; status: "running" | "ok" | "error"; at: string; plan?: string; truncated?: boolean; offset?: number }
   | {
       id: string;
       role: "question";
@@ -15,6 +15,7 @@ export type Item =
       cancelled: boolean;
       open: boolean;
       at: string;
+      offset?: number;
     };
 
 export type Banner = {
@@ -419,7 +420,17 @@ export function toItems(messages: readonly Message[], openQuestionId: string | n
       case "agent":
         return { id: message.id, role: "agent", text: message.text, at: message.at, status: message.status };
       case "tool":
-        return { id: message.id, role: "tool", name: message.name, summary: message.summary, status: message.status, at: message.at };
+        return {
+          id: message.id,
+          role: "tool",
+          name: message.name,
+          summary: message.summary,
+          status: message.status,
+          at: message.at,
+          ...(message.plan !== undefined ? { plan: message.plan } : {}),
+          ...(message.truncated === true ? { truncated: true } : {}),
+          ...(message.offset !== undefined ? { offset: message.offset } : {}),
+        };
       case "question":
         return questionItem(message, openQuestionId);
       default:
@@ -472,6 +483,9 @@ function applyEvent(state: ChatSlice, event: FlowEvent): ChatSlice {
       summary: event.summary,
       status: event.status,
       at: new Date().toISOString(),
+      ...(event.plan !== undefined ? { plan: event.plan } : {}),
+      ...(event.truncated === true ? { truncated: true } : {}),
+      ...(event.offset !== undefined ? { offset: event.offset } : {}),
     };
     return {
       ...state,
@@ -559,7 +573,17 @@ function upsertTool(items: readonly Item[], agentId: string | null, tool: Extrac
   if (index >= 0) {
     const next = items.slice();
     const current = next[index];
-    if (current?.role === "tool") next[index] = { ...current, name: tool.name, summary: tool.summary, status: tool.status };
+    if (current?.role === "tool") {
+      next[index] = {
+        ...current,
+        name: tool.name,
+        summary: tool.summary,
+        status: tool.status,
+        ...(tool.plan !== undefined ? { plan: tool.plan } : {}),
+        ...(tool.truncated === true ? { truncated: true } : {}),
+        ...(current.offset === undefined && tool.offset !== undefined ? { offset: tool.offset } : {}),
+      };
+    }
     return next;
   }
   const agentIndex = agentId === null ? -1 : items.findIndex((item) => item.id === agentId);
@@ -585,6 +609,7 @@ function questionItem(message: Extract<Message, { role: "question" }>, openQuest
     role: "question",
     questionId: message.questionId,
     ...(message.title !== undefined ? { title: message.title } : {}),
+    ...(message.offset !== undefined ? { offset: message.offset } : {}),
     questions: message.questions,
     answers: message.answers,
     skipped: message.skipped,
@@ -600,6 +625,7 @@ function askedItem(event: Extract<FlowEvent, { type: "question.asked" }>): Extra
     role: "question",
     questionId: event.questionId,
     ...(event.title !== undefined ? { title: event.title } : {}),
+    ...(event.offset !== undefined ? { offset: event.offset } : {}),
     questions: event.questions,
     answers: null,
     skipped: false,

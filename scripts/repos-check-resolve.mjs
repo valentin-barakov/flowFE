@@ -1,4 +1,4 @@
-// Resolver for `npm run check:repos` only. App files keep NodeNext `.js` specifiers.
+// Resolver for check scripts that import app files. App files keep NodeNext `.js` specifiers.
 // This maps a relative `.js` import to the sibling `.ts` file when that file is the one on disk.
 import { existsSync } from "node:fs";
 import { register } from "node:module";

@@ -75,6 +75,27 @@ The agent can run shell and edit tools. This version has no toggle that removes 
 **Reason:** Valentin, 2026-11-05.
 **Rejected:** a read-only toggle in v1.
 
+### D-13: Conversation mode is Agent or Plan (accepted)
+
+The workspace has one mode, `agent` or `plan`, stored in `settings.json`. A missing field reads as `agent`. Each send passes that mode to the SDK on `Agent.create` and on `agent.send`. Changing it does not create a new agent, and it is refused while any repo is busy, the same as changing the model. A finished `createPlan` tool is shown as a rendered plan card. The user switches back to Agent and sends another message to have the work implemented.
+
+**Reason:** Valentin, 2026-11-06. `@cursor/sdk` 1.2.0 `AgentModeOption` is `"agent" | "plan"`.
+**Rejected:** Ask mode or a read-only tool lock (still D-12); a separate mode per repo; a Build button.
+
+### D-14: Markdown in the chat uses `react-markdown` and `remark-gfm` (accepted)
+
+Agent text and plan cards render through `react-markdown` 10.1.0 with `remark-gfm` 4.0.1, pinned exactly, as `devDependencies` (Vite bundles them into the window). The options live in `src/renderer/markdown-config.ts`. Raw HTML is not enabled, images are dropped, and a link is shown as styled text because the window refuses navigation and has no open-external command.
+**Reason:** Valentin, 2026-11-06. The agent writes tables, nested lists, and half-finished text while streaming, and the hand-written parser covered only headings, paragraphs, flat lists, fences, inline code, and bold. The library builds React elements and never inserts HTML, so it fits the locked renderer.
+**Rejected:** `marked` or `markdown-it` (HTML strings, so a sanitizer is also needed); `streamdown` (built for streaming, but brings code highlighting and Tailwind-oriented styling this app does not use); extending the hand-written parser (Mango would own a markdown parser).
+**Still open:** clickable links need an IPC command that checks `http(s)` and calls `shell.openExternal` in main.
+
+### D-15: Diagrams and charts use `mermaid`, shown as an image (accepted)
+
+A fenced `mermaid` block in agent text or a plan is drawn with `mermaid` 12.3.0, pinned exactly, as a `devDependency`. The library is loaded with a dynamic import on the first diagram. It runs with `securityLevel: "strict"` and plain SVG labels. The SVG is shown through `<img>` with a data URL. A block in a message that is still streaming is shown as code. A block that does not parse is shown as code with a note. The page CSP is not changed.
+**Reason:** Valentin, 2026-11-06. Plans and replies contain flowcharts and sequence diagrams as `mermaid` fences, and they showed as code. Mermaid draws flowcharts, sequence, state, ER, class, gantt, pie, and `xychart` charts, which covers the diagrams the agent writes. An `<img>` cannot run script or load other resources, so the locked renderer stays as it is.
+**Rejected:** inserting the SVG into the page with `dangerouslySetInnerHTML` (the sanitizer would be the only guard); rendering diagrams in main or in a hidden window (a new process boundary); a charting library such as Chart.js (a second format the agent does not write); leaving diagrams as code.
+**Still open:** zoom, pan, and export of a diagram; text inside a diagram image cannot be selected.
+
 ## Open questions
 
 | ID | Question | Answer | Owner |

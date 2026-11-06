@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Settings, Theme } from "../shared/ipc.js";
+import type { AgentMode, Settings, Theme } from "../shared/ipc.js";
 import { Bot } from "./Bot.js";
 import type { ModelChoice } from "./state.js";
 
@@ -15,10 +15,11 @@ type SetupProps = {
   onPickFolder: () => Promise<void>;
   onModel: (model: string) => Promise<boolean>;
   onTheme: (theme: Theme) => void;
+  onMode: (mode: AgentMode) => void;
   onBack: (() => void) | null;
 };
 
-export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onBack }: SetupProps) {
+export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onMode, onBack }: SetupProps) {
   const [replacing, setReplacing] = useState(false);
   const [key, setKey] = useState("");
   const showKeyField = !settings.keySet || replacing;
@@ -42,87 +43,100 @@ export function Setup({ settings, models, modelsError, pending, repos, locked, o
       >
         <div className="setup-head">
           <Bot kind="agent" large />
-          <div>
+          <div className="setup-title-row">
             <h2>Set up Mango</h2>
-            <p className="lead">The key stays on this Mac. The app shows that it is set, and never the key itself.</p>
+            <ThemeSwitch theme={settings.theme} onTheme={onTheme} />
           </div>
-          <ThemeSwitch theme={settings.theme} onTheme={onTheme} />
+          <p className="lead">The key stays on this Mac. The app shows that it is set, and never the key itself.</p>
         </div>
 
-        <label htmlFor="cursor-key">Cursor key</label>
-        {showKeyField ? (
-          <div className="secret">
-            <input
-              id="cursor-key"
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              value={key}
-              placeholder={settings.keySet ? "Paste a new key" : "Paste your Cursor API key"}
-              onChange={(event) => setKey(event.target.value)}
-            />
-            <button type="button" className="btn primary" disabled={pending || locked || key.trim() === ""} onClick={() => void saveKey()}>
-              Save key
-            </button>
-            {settings.keySet ? (
-              <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(false)}>
-                Cancel
+        <section className="setup-field">
+          <label htmlFor="cursor-key">Cursor key</label>
+          {showKeyField ? (
+            <div className="secret">
+              <input
+                id="cursor-key"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={key}
+                placeholder={settings.keySet ? "Paste a new key" : "Paste your Cursor API key"}
+                onChange={(event) => setKey(event.target.value)}
+              />
+              <button type="button" className="btn primary" disabled={pending || locked || key.trim() === ""} onClick={() => void saveKey()}>
+                Save key
               </button>
-            ) : null}
-          </div>
-        ) : (
+              {settings.keySet ? (
+                <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(false)}>
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="secret">
+              <span className="key-state">Key saved</span>
+              <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(true)}>
+                Replace
+              </button>
+              <button type="button" className="btn danger" disabled={pending || locked} onClick={() => void onClearKey()}>
+                Remove
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section className="setup-field">
+          <label>Workspace folder</label>
           <div className="secret">
-            <span>Key saved</span>
-            <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(true)}>
-              Replace
+            <button type="button" className="btn" disabled={pending || locked} onClick={() => void onPickFolder()}>
+              Choose folder
             </button>
-            <button type="button" className="btn danger" disabled={pending || locked} onClick={() => void onClearKey()}>
-              Remove
-            </button>
+            <span className="path" title={settings.folder ?? undefined}>
+              {settings.folder ?? "No folder yet"}
+            </span>
           </div>
-        )}
+          {repos.length > 0 ? (
+            <p className="meta">{repos.map((repo) => (repo.name === "." ? "This folder" : repo.name)).join(", ")}</p>
+          ) : null}
+          <div className="setup-notes">
+            <p>The agent can run shell commands and edit files in these repos without asking you first.</p>
+            <p>Rules and skills from the repo you message are loaded. The agent may also see other instruction sources.</p>
+          </div>
+        </section>
 
-        <label>Workspace folder</label>
-        <div className="secret">
-          <button type="button" className="btn" disabled={pending || locked} onClick={() => void onPickFolder()}>
-            Choose folder
-          </button>
-          <span className="path" title={settings.folder ?? undefined}>
-            {settings.folder ?? "No folder yet"}
-          </span>
-        </div>
-        {repos.length > 0 ? (
-          <p className="meta">{repos.map((repo) => (repo.name === "." ? "This folder" : repo.name)).join(", ")}</p>
-        ) : null}
-        <p className="warn">The agent can run shell commands and edit files in these repos without asking you first.</p>
-        <p className="warn">Rules and skills from the repo you message are loaded. The agent may also see other instruction sources.</p>
+        <section className="setup-field">
+          <label htmlFor="model">Model</label>
+          <select
+            id="model"
+            value={settings.model ?? ""}
+            disabled={pending || locked || !settings.keySet || choices.length === 0}
+            onChange={(event) => {
+              const model = event.target.value;
+              if (model !== "") void onModel(model);
+            }}
+          >
+            <option value="">{settings.keySet ? "Choose a model" : "Save the key first"}</option>
+            {choices.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+          {modelsError ? <p className="error">{modelsError}</p> : null}
+        </section>
 
-        <label htmlFor="model">Model</label>
-        <select
-          id="model"
-          value={settings.model ?? ""}
-          disabled={pending || locked || !settings.keySet || choices.length === 0}
-          onChange={(event) => {
-            const model = event.target.value;
-            if (model !== "") void onModel(model);
-          }}
-        >
-          <option value="">{settings.keySet ? "Choose a model" : "Save the key first"}</option>
-          {choices.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))}
-        </select>
-        {modelsError ? <p className="error">{modelsError}</p> : null}
+        <section className="setup-field">
+          <label>Mode</label>
+          <ModeSwitch mode={settings.mode} disabled={pending || locked} onMode={onMode} />
+        </section>
 
-        <p className="actions">
-          {onBack ? (
+        {onBack ? (
+          <p className="actions">
             <button type="button" className="btn" onClick={onBack}>
               Back to chat
             </button>
-          ) : null}
-        </p>
+          </p>
+        ) : null}
       </form>
     </div>
   );
@@ -131,6 +145,31 @@ export function Setup({ settings, models, modelsError, pending, repos, locked, o
 export function modelChoices(models: ModelChoice[], selected: string | null): ModelChoice[] {
   if (selected === null || models.some((model) => model.id === selected)) return models;
   return [{ id: selected, label: selected }, ...models];
+}
+
+const MODE_CHOICES = [
+  { id: "agent", label: "Agent" },
+  { id: "plan", label: "Plan" },
+] as const;
+
+export function ModeSwitch({ mode, disabled, onMode }: { mode: AgentMode; disabled: boolean; onMode: (mode: AgentMode) => void }) {
+  return (
+    <span className="agent-mode" role="group" aria-label="Mode">
+      {MODE_CHOICES.map((choice) => (
+        <button
+          key={choice.id}
+          type="button"
+          disabled={disabled}
+          aria-pressed={mode === choice.id}
+          onClick={() => {
+            if (choice.id !== mode) onMode(choice.id);
+          }}
+        >
+          {choice.label}
+        </button>
+      ))}
+    </span>
+  );
 }
 
 const THEME_CHOICES = [

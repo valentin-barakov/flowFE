@@ -26,6 +26,11 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: Failure };
 export const ThemeSchema = z.enum(["system", "light", "dark"]);
 export type Theme = z.infer<typeof ThemeSchema>;
 
+export const AgentModeSchema = z.enum(["agent", "plan"]);
+export type AgentMode = z.infer<typeof AgentModeSchema>;
+
+export const PLAN_TEXT_MAX = 200_000;
+
 export const ChatStateSchema = z.enum(["needsSetup", "ready", "streaming", "stopping", "awaitingAnswer"]);
 export type ChatStateName = z.infer<typeof ChatStateSchema>;
 
@@ -59,6 +64,7 @@ export const SettingsSchema = z.object({
   /** Workspace folder. Repos are its child git directories, or this folder when it is the only repo. */
   folder: z.string().nullable(),
   model: z.string().nullable(),
+  mode: AgentModeSchema,
   theme: ThemeSchema,
   keySet: z.boolean(),
   /** The stored folder path is set, and that path is not a directory now. */
@@ -88,6 +94,10 @@ export const MessageSchema = z.discriminatedUnion("role", [
     summary: z.string(),
     status: z.enum(["ok", "error"]),
     at: z.string().min(1),
+    plan: z.string().max(PLAN_TEXT_MAX).optional(),
+    truncated: z.boolean().optional(),
+    /** Characters of agent text that existed when this call first appeared. Absent in old chats. */
+    offset: z.number().int().min(0).optional(),
   }),
   z.object({
     id: z.string().min(1),
@@ -98,6 +108,8 @@ export const MessageSchema = z.discriminatedUnion("role", [
     answers: AnswersSchema.nullable(),
     skipped: z.boolean(),
     at: z.string().min(1),
+    /** Characters of agent text that existed when the question was asked. Absent in old chats. */
+    offset: z.number().int().min(0).optional(),
   }),
 ]);
 export type Message = z.infer<typeof MessageSchema>;
@@ -157,6 +169,7 @@ export const COMMANDS = {
       .object({
         folder: z.string().min(1).optional(),
         model: z.string().min(1).optional(),
+        mode: AgentModeSchema.optional(),
         theme: ThemeSchema.optional(),
       })
       .strict(),
@@ -248,6 +261,9 @@ export const EventSchema = z.discriminatedUnion("type", [
     name: z.string().min(1),
     status: z.enum(["running", "ok", "error"]),
     summary: z.string(),
+    plan: z.string().max(PLAN_TEXT_MAX).optional(),
+    truncated: z.boolean().optional(),
+    offset: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal("chat.done"),
@@ -271,6 +287,7 @@ export const EventSchema = z.discriminatedUnion("type", [
     questionId: z.string().min(1),
     title: z.string().min(1).max(200).optional(),
     questions: z.array(QuestionSchema).min(1).max(8),
+    offset: z.number().int().min(0).optional(),
   }),
   z.object({
     type: z.literal("question.closed"),

@@ -46,6 +46,8 @@ type RunRecord = {
   settled: boolean;
   abandoned: boolean;
   text: string;
+  /** Length of `text` when each tool call first appeared, keyed by tool call id. */
+  toolOffsets: Map<string, number>;
 };
 
 /** `FlowEvent` already requires `repo`. Call sites build the rest; the session wrapper sets it. */
@@ -167,6 +169,7 @@ export function createRepoSession(options: {
       settled: false,
       abandoned: false,
       text: "",
+      toolOffsets: new Map(),
     };
     state = "streaming";
     emitState();
@@ -179,6 +182,7 @@ export function createRepoSession(options: {
         cwd: repoPath,
         agentId: fresh ? null : prior.agentId,
         fresh,
+        mode: current.mode,
       });
       if (isStale(nextGeneration)) return { ...ids, restored: false };
       if (ensured.agentId !== prior.agentId) {
@@ -190,6 +194,7 @@ export function createRepoSession(options: {
       await agents.beginSend({
         apiKey: key,
         modelId: current.model,
+        mode: current.mode,
         prompt,
         onEvent: (event) => handleStream(nextGeneration, event),
       });
@@ -227,6 +232,7 @@ export function createRepoSession(options: {
     }
     const currentRun = run;
     const questionId = randomUUID();
+    const offset = currentRun.text.length;
     const message: Message = {
       id: questionId,
       role: "question",
@@ -236,6 +242,7 @@ export function createRepoSession(options: {
       answers: null,
       skipped: false,
       at: new Date().toISOString(),
+      offset,
     };
     try {
       const chat = store.readChat(repoPath);
@@ -259,6 +266,7 @@ export function createRepoSession(options: {
         runId: currentRun.id,
         questionId,
         questions: request.questions,
+        offset,
         ...(request.title ? { title: request.title } : {}),
       });
     });
@@ -321,6 +329,11 @@ export function createRepoSession(options: {
       return;
     }
     if (event.type === "tool") {
+      let offset = run.toolOffsets.get(event.toolCallId);
+      if (offset === undefined) {
+        offset = run.text.length;
+        run.toolOffsets.set(event.toolCallId, offset);
+      }
       emit({
         type: "chat.tool",
         runId: run.id,
@@ -328,8 +341,11 @@ export function createRepoSession(options: {
         name: event.name,
         status: event.status,
         summary: event.summary,
+        offset,
+        ...(event.plan !== undefined ? { plan: event.plan } : {}),
+        ...(event.truncated === true ? { truncated: true } : {}),
       });
-      if (event.status !== "running") persistTool(current, event);
+      if (event.status !== "running") persistTool(current, event, offset);
       return;
     }
     if (event.type === "error" || event.type === "done") {
@@ -347,24 +363,30 @@ export function createRepoSession(options: {
     }
   }
 
-  function persistTool(current: number, event: Extract<AgentStreamEvent, { type: "tool" }>): void {
+  function persistTool(current: number, event: Extract<AgentStreamEvent, { type: "tool" }>, offset: number): void {
     if (run === null || run.generation !== current) return;
     const agentMessageId = run.agentMessageId;
     const chat = store.readChat(repoPath);
     const status: "ok" | "error" = event.status === "error" ? "error" : "ok";
+    const saved = {
+      name: event.name,
+      summary: event.summary,
+      status,
+      offset,
+      ...(event.plan !== undefined ? { plan: event.plan } : {}),
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
     const existing = chat.messages.some((message) => message.id === event.toolCallId);
     const messages: Message[] = existing
       ? chat.messages.map((message): Message => {
           if (message.id !== event.toolCallId || message.role !== "tool") return message;
-          return { id: message.id, role: "tool", name: event.name, summary: event.summary, status, at: message.at };
+          return { id: message.id, role: "tool", at: message.at, ...saved };
         })
       : insertTool(chat.messages, agentMessageId, {
           id: event.toolCallId,
           role: "tool",
-          name: event.name,
-          summary: event.summary,
-          status,
           at: new Date().toISOString(),
+          ...saved,
         });
     store.writeChat(repoPath, { agentId: chat.agentId, messages });
   }

@@ -28,9 +28,9 @@ stateDiagram-v2
 | `awaitingAnswer` | Disabled | Shown | `question.answer`, `question.skip`, `chat.stop`. Theme can still be saved |
 | `stopping` | Disabled | Disabled | none that change the run; theme can still be saved. The run ends on its own |
 
-A command sent in the wrong state returns `not_ready` or `conflict`. Changing the folder, the model, or the key, and resetting the chat, return `conflict` while the state is `streaming`, `awaitingAnswer`, or `stopping`. `folder.pick` only opens the dialog; saving the chosen folder is what checks the state.
+A command sent in the wrong state returns `not_ready` or `conflict`. Changing the folder, the model, the mode, or the key, and resetting the chat, return `conflict` while the state is `streaming`, `awaitingAnswer`, or `stopping`. `folder.pick` only opens the dialog; saving the chosen folder is what checks the state.
 
-**Reset chat** (`chat.reset` with `repo`) asks for confirmation, then disposes that repo's agent and writes `agentId: null` with an empty message list for that repo. Other repos keep running. Rules and skills files are left as they are. A missing repo path returns `not_ready` with "That folder is missing." Saving a different workspace folder, saving a new key, or clearing the key disposes every repo agent and cancels every pending question, and is refused with `conflict` while any repo is `streaming`, `awaitingAnswer`, or `stopping`. Saving the model is refused the same way. Theme can still be saved.
+**Reset chat** (`chat.reset` with `repo`) asks for confirmation, then disposes that repo's agent and writes `agentId: null` with an empty message list for that repo. Other repos keep running. Rules and skills files are left as they are. A missing repo path returns `not_ready` with "That folder is missing." Saving a different workspace folder, saving a new key, or clearing the key disposes every repo agent and cancels every pending question, and is refused with `conflict` while any repo is `streaming`, `awaitingAnswer`, or `stopping`. Saving the model or the mode is refused the same way. Theme can still be saved. The mode on a send is the mode stored at the start of that send.
 
 ## Several repos
 
@@ -61,7 +61,7 @@ sequenceDiagram
     M-->>R: chat.done, chat.state
 ```
 
-Messages are persisted when they complete, not on every delta, with one exception: the agent message is written once at the start with `status: "interrupted"` and empty text, and rewritten with the streamed text on `done`, Stop, or an error. Tool lines are written when they finish. If the process dies mid-stream, that file is what remains: the agent message marked `interrupted`, without text that was only in memory. On quit, main rejects a pending question, marks the run settled without rewriting the message, and disposes the agent. Dispose waits at most 3 seconds, then the app quits.
+Messages are persisted when they complete, not on every delta, with one exception: the agent message is written once at the start with `status: "interrupted"` and empty text, and rewritten with the streamed text on `done`, Stop, or an error. Tool lines are written when they finish. Each tool line and each question carries `offset`, the length of the run's text when it first appeared, so the saved chat can show text, tool calls, questions, and plans in order. Chats saved before this have no `offset`; their tool lines and cards show first, then the text. The `ask_user_question` call has no tool line, because the question card is its display. If the process dies mid-stream, that file is what remains: the agent message marked `interrupted`, without text that was only in memory. On quit, main rejects a pending question, marks the run settled without rewriting the message, and disposes the agent. Dispose waits at most 3 seconds, then the app quits.
 
 ## Question flow
 

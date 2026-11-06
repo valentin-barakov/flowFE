@@ -90,19 +90,22 @@ sequenceDiagram
 - IPC catalog in `src/shared/ipc.ts`. Preload forwards `COMMANDS` and `EVENT_CHANNEL` and does not name individual commands (`src/preload/index.ts`, `src/preload/bridge.ts`).
 - One renderer reducer and one event buffer in `src/renderer/state.ts` and `src/renderer/App.tsx`.
 - Checks: `npm run typecheck`, `npm run check:questions`, `node --experimental-strip-types scripts/phase2-files-check.mjs`.
+- `repo` on command inputs and events, and `flow:repos.list`. COMPLETED in Step 2
+- `listRepos`, and chat reads and writes addressed by repo path. COMPLETED in Step 3
+- Rules and skills methods that take a repo path. COMPLETED in Step 4
+- `RepoSession` plus `SessionManager` with one agent per repo. COMPLETED in Step 5 and Step 6
+- `scripts/mention-check.ts` and `scripts/repos-check.ts`. COMPLETED in Step 6 (`mention-check.ts` landed in Step 1)
+- Per-repo renderer slices, the sidebar, the home screen, and `@` parsing. COMPLETED in Step 11
 
 **❌ Missing Components**
 
-- `repo` on command inputs and events, and `flow:repos.list`.
-- `listRepos`, and chat reads and writes addressed by repo path.
-- Rules and skills methods that take a repo path.
-- `RepoSession` plus `SessionManager` with one agent per repo.
-- Per-repo renderer slices, the sidebar, the home screen, and `@` parsing.
-- `scripts/mention-check.ts` and `scripts/repos-check.ts`.
+None.
 
 ## Implementation Steps
 
-### Step 1: Mention parsing
+### ✅ Step 1: Mention parsing
+
+Landed `src/shared/mention.ts`, `scripts/mention-check.ts`, and `check:mentions` in `package.json`. `npm run check:mentions` not run.
 
 - **Files:** `src/shared/mention.ts`, `scripts/mention-check.ts`, `package.json`
 - **Change:** Add the pure helpers the home composer and its check script share. `@` counts only at the start of the text or after whitespace, so an email address is not a mention.
@@ -232,7 +235,9 @@ test("the popup filters by prefix and hides the root repo name", () => {
 
 Run `npm run check:mentions` after this step. It does not need the later steps.
 
-### Step 2: IPC contract
+### ✅ Step 2: IPC contract
+
+Landed `RepoNameSchema`, `flow:repos.list`, required `repo` on chat, question, rules, skills, and AGENTS.md commands, and `repo` on every event. Callers left for later steps. `npm run typecheck` not run.
 
 - **Files:** `src/shared/ipc.ts`
 - **Change:** Require a repo name on every chat, question, rules, skills, and `AGENTS.md` command. Add `flow:repos.list`. Add `repo` to every event. `settings.json` fields do not change. `folder` is the workspace folder.
@@ -334,7 +339,9 @@ Do the same `repo: RepoNameSchema` insertion on the other six event objects. Lea
 
 No test in this step. `scripts/mention-check.ts` does not import these schemas. The contract is exercised by `scripts/repos-check.ts` in Step 6 and by `npm run typecheck` after Step 11.
 
-### Step 3: Settings store
+### ✅ Step 3: Settings store
+
+Landed `listRepos`, `chatPath`, and path-addressed `readChat` / `writeChat` in `src/main/settings-store.ts`. Callers still use the old signatures.
 
 - **Files:** `src/main/settings-store.ts`
 - **Change:** Scan repos on each call. Read and write a chat by the repo's real path, using the same hash as today's `folderId`.
@@ -434,7 +441,9 @@ function hasGit(dir: string): boolean {
 
 `scripts/repos-check.ts` in Step 6 covers `listRepos`. No separate test file in this step.
 
-### Step 4: Rules and skills take a repo path
+### ✅ Step 4: Rules and skills take a repo path
+
+Landed repo-path arguments on every `RulesSkills` read and write, and updated `scripts/phase2-files-check.mjs` call sites. `node --experimental-strip-types scripts/phase2-files-check.mjs` not run. Existing test assertion data was kept.
 
 - **Files:** `src/main/rules-skills-service.ts`, `scripts/phase2-files-check.mjs`
 - **Change:** Drop `options.folder()`. Every read and write takes the repo path first. `seenDirty` and `clearDirty` already take a path and stay as they are.
@@ -505,7 +514,9 @@ The dirty test keeps `files.seenDirty(root)` and `files.clearDirty(root, seen)`,
 
 Run `node --experimental-strip-types scripts/phase2-files-check.mjs` after this step.
 
-### Step 5: RepoSession
+### ✅ Step 5: RepoSession
+
+Landed `createRepoSession` in `src/main/chat-session.ts`. The emit wrapper stamps `repo` onto events that omit it (`EventWithoutRepo`), because `FlowEvent` already requires `repo`; `emitState` passes that partial object through the wrapper. Dropped unused `Settings` and `Theme` imports with `view`, `save`, `setKey`, `clearKey`, and `listModels`. Checks not run.
 
 - **Files:** `src/main/chat-session.ts`
 - **Change:** Bind the current session logic to one repo path. Global folder, key, and model operations move to `SessionManager` in Step 6. Events go out through a wrapper that sets `repo`.
@@ -516,6 +527,9 @@ Add `statSync` to a new import from `node:fs`.
 
 Replace the `ChatSession` type and `createChatSession` with:
 ```ts
+type OmitKey<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type EventWithoutRepo = OmitKey<FlowEvent, "repo">;
+
 export type RepoSession = {
   name(): string;
   path(): string;
@@ -542,8 +556,8 @@ export function createRepoSession(options: {
   emit: (event: FlowEvent) => void;
 }): RepoSession {
   const { repoName, repoPath, store, agents, files } = options;
-  const emit = (event: FlowEvent): void => {
-    options.emit({ ...event, repo: repoName });
+  const emit = (event: EventWithoutRepo): void => {
+    options.emit({ ...event, repo: repoName } as FlowEvent);
   };
 ```
 
@@ -636,7 +650,11 @@ Replace `shutdown` and the returned object:
 
 `stateValue` stays, using the updated `instructionsPending`. The 3 second cap moves to the manager in Step 6 so one cap covers every repo.
 
-### Step 6: SessionManager and the concurrency check
+### ✅ Step 6: SessionManager and the concurrency check
+
+Landed `src/main/session-manager.ts`, `scripts/repos-check.ts`, and `check:repos`. The cap of 7 and the eighth-repo refusal message match the plan. `gitRepo` uses `mkdirSync(..., { recursive: true })` so child repos in the two-repo and eighth-repo tests exist. That test's `beginSend` returns `Promise<void>`. Gate resolvers are `() => resolvePromise()` so they match `() => void`. `npm run check:repos` passes via `scripts/repos-check-resolve.mjs`.
+
+`npm run check:repos` keeps `--disable-warning=ExperimentalWarning` and `--experimental-strip-types`, and loads `scripts/repos-check-resolve.mjs`, which resolves a relative `.js` specifier to the sibling `.ts` file when that file exists.
 
 - **Files:** `src/main/session-manager.ts`, `scripts/repos-check.ts`, `package.json`
 - **Change:** Own the repo map, create one `AgentService` per repo on first send, refuse a second send in a busy repo, refuse a send that would make an 8th repo busy, and refuse folder, model, and key changes while any repo is busy. The cap is 7. Count sessions whose `isBusy()` is true. Check it in `send` after `sessionFor` and before `session.send`. If that session is not busy and the count is already 7, throw `SessionError("conflict", "Seven agents are already running. Stop one before starting another.", false)`.
@@ -923,7 +941,7 @@ function workspace(): string {
 }
 
 function gitRepo(dir: string): void {
-  mkdirSync(path.join(dir, ".git"));
+  mkdirSync(path.join(dir, ".git"), { recursive: true });
 }
 
 test("a git workspace is the only repo", () => {
@@ -1005,7 +1023,7 @@ test("two repos run, the same repo conflicts, and a question stays in its repo",
               });
               seen.push(result);
             }
-            await new Promise<void>((resolvePromise) => gates.push({ resolve: resolvePromise }));
+            await new Promise<void>((resolvePromise) => gates.push({ resolve: () => resolvePromise() }));
           },
           async cancel() {},
           async dispose() {},
@@ -1057,7 +1075,7 @@ test("an eighth busy repo is refused", async () => {
             return { agentId: "agent-1", restored: false };
           },
           beginSend() {
-            return new Promise(() => undefined);
+            return new Promise<void>(() => undefined);
           },
           async cancel() {},
           async dispose() {},
@@ -1093,7 +1111,9 @@ async function waitFor<T>(read: () => T | null | undefined): Promise<T> {
 
 Run `npm run check:repos` after this step.
 
-### Step 7: Wire main
+### ✅ Step 7: Wire main
+
+Landed `SessionManager` dispatch in `src/main/ipc.ts` and `createSessionManager` in `src/main/index.ts`. `createChatSession`, the `askBridge`, and the rules `folder` callback are gone. Checks not run.
 
 - **Files:** `src/main/ipc.ts`, `src/main/index.ts`
 - **Change:** Dispatch `input.repo` through the manager. Build one manager instead of one session. Quit still calls `shutdown()`.
@@ -1230,7 +1250,9 @@ Add imports for `createSessionManager` from `./session-manager.js`. Remove the `
 
 The preload is unchanged. No new test here. `npm run check:repos` still covers the manager.
 
-### Step 8: Renderer state
+### ✅ Step 8: Renderer state
+
+Landed per-repo `chats` slices, `routeEvent`, and the new reducer actions in `src/renderer/state.ts`. Checks not run.
 
 - **Files:** `src/renderer/state.ts`
 - **Change:** Keep global settings on `AppState`. Move the transcript into `chats[repo]`. Route events by `event.repo`.
@@ -1364,7 +1386,9 @@ Change `applyEvent` so its first argument is `ChatSlice`. Its body stays. It alr
 
 No new test runner for the reducer. Step 11's manual check covers it. `npm run typecheck` is the check, and it passes only after Step 11.
 
-### Step 9: Home, mentions, and the sidebar
+### ✅ Step 9: Home, mentions, and the sidebar
+
+Landed `MentionComposer`, `NewChat`, and `RepoSidebar`, and appended the home and sidebar styles. The shell rule is `.app > .shell` so the existing editor `.shell` grid is unchanged. Tab or Enter chooses the narrowed match.
 
 - **Files:** `src/renderer/MentionComposer.tsx`, `src/renderer/NewChat.tsx`, `src/renderer/RepoSidebar.tsx`, `src/renderer/styles.css`
 - **Change:** Add the home composer with an `@` popup, and the list of chats that are running or have history.
@@ -1560,7 +1584,7 @@ export function RepoSidebar({ rows, onOpen, onNew }: RepoSidebarProps) {
 
 `src/renderer/styles.css` (append)
 ```css
-.shell { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.app > .shell { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .sidebar {
   width: 196px;
   flex: none;
@@ -1611,7 +1635,9 @@ export function RepoSidebar({ rows, onOpen, onNew }: RepoSidebarProps) {
 
 The mention check from Step 1 covers `mentionQuery` and `filterRepoNames`. The popup keys are checked manually in Step 11.
 
-### Step 10: App wiring
+### ✅ Step 10: App wiring
+
+Landed per-repo holds, boot, `loadRepo`, `sendRepo`, and `sendHome` (including the seven-agent notice) in `App.tsx`. Settings and key saves pass `repos`. A failed history or state call on the one-repo boot still sets `repo`, with messages `[]` and chat state `needsSetup`. A failed `repos.list` boots home with `repos: []`. Successful folder pick drops held events and bumps load tokens; a failed pick replays them. Reset bumps that repo's load token. `send-failed` does not refresh `instructions-pending`. Checks not run.
 
 - **Files:** `src/renderer/App.tsx`
 - **Change:** Buffer events per repo. Load one repo's history when it is opened. A multi-repo workspace starts on the home screen. A single repo skips it.
@@ -1755,7 +1781,9 @@ Render, when setup is complete and there is more than one repo, a `.shell` conta
 
 Import `parseMention` from `../shared/mention.js`, `anyBusy` and `isBusyState` from `./state.js`, and the three new components.
 
-### Step 11: Chat, instructions, and setup
+### ✅ Step 11: Chat, instructions, and setup
+
+Landed `repoName` and `workspaceBusy` on Chat, `repo` on the rules, skills, and AGENTS editors, and `repos` plus `locked` on Setup. Reset chat replaces the in-chat New chat label.
 
 - **Files:** `src/renderer/Chat.tsx`, `src/renderer/Instructions.tsx`, `src/renderer/RulesEditor.tsx`, `src/renderer/SkillsEditor.tsx`, `src/renderer/Setup.tsx`
 - **Change:** Show the locked repo. Pass `repo` on every file and chat call. Disable model and setup changes while any repo is busy. Rename the folder field to the workspace.
@@ -1830,7 +1858,9 @@ node --experimental-strip-types scripts/phase2-files-check.mjs
 
 Then `npm start` and, with a folder that contains two git repos: type `@` and confirm the list, start both agents, switch between them, send `@` again to the running one and confirm the notice, answer a question in the chat that is not on screen, and quit while both are running. With a folder that is itself one repo, confirm there is no home screen.
 
-### Step 12: Update Documentation (always the last step)
+### ✅ Step 12: Update Documentation (always the last step)
+
+Landed the decision, architecture, session, IPC, README, docs README, and package description edits, including the cap of 7 busy repo agents. The context diagram Folder label stays "Chosen folder": the plan names that change and does not give the new label. `npm run check:repos` passes via `scripts/repos-check-resolve.mjs`.
 
 See **Documentation Update** below. Apply those edits and no others.
 
@@ -1849,10 +1879,10 @@ See **Documentation Update** below. Apply those edits and no others.
 
 ## Testing Checklist
 
-- [ ] `npm run check:mentions` passes after Step 1
-- [ ] `node --experimental-strip-types scripts/phase2-files-check.mjs` passes after Step 4
-- [ ] `npm run check:repos` passes after Step 6
-- [ ] `npm run typecheck` and `npm run check:questions` pass after Step 11
+- [x] `npm run check:mentions` passes after Step 1
+- [x] `node --experimental-strip-types scripts/phase2-files-check.mjs` passes after Step 4
+- [x] `npm run check:repos` passes after Step 6
+- [x] `npm run typecheck` and `npm run check:questions` pass after Step 11
 - [ ] Two git repos in one workspace: `@` list, both agents running, switch chats, second `@api` blocked, a background question can be answered, quit while both run
 - [ ] An 8th busy repo is refused, in the window and in main, with "Seven agents are already running. Stop one before starting another."
 - [ ] A workspace that is itself one git repo opens one chat and shows no home screen
@@ -1860,37 +1890,39 @@ See **Documentation Update** below. Apply those edits and no others.
 - [ ] Reset chat clears one repo and leaves the other transcript in place
 - [ ] Model and Setup stay disabled while any repo is streaming
 
+The manual two-repo Electron pass is still unverified.
+
 ## Files to Modify
 
-- [ ] `src/shared/mention.ts`
-- [ ] `scripts/mention-check.ts`
-- [ ] `package.json`
-- [ ] `src/shared/ipc.ts`
-- [ ] `src/main/settings-store.ts`
-- [ ] `src/main/rules-skills-service.ts`
-- [ ] `scripts/phase2-files-check.mjs`
-- [ ] `src/main/chat-session.ts`
-- [ ] `src/main/session-manager.ts`
-- [ ] `scripts/repos-check.ts`
-- [ ] `src/main/ipc.ts`
-- [ ] `src/main/index.ts`
-- [ ] `src/renderer/state.ts`
-- [ ] `src/renderer/MentionComposer.tsx`
-- [ ] `src/renderer/NewChat.tsx`
-- [ ] `src/renderer/RepoSidebar.tsx`
-- [ ] `src/renderer/styles.css`
-- [ ] `src/renderer/App.tsx`
-- [ ] `src/renderer/Chat.tsx`
-- [ ] `src/renderer/Instructions.tsx`
-- [ ] `src/renderer/RulesEditor.tsx`
-- [ ] `src/renderer/SkillsEditor.tsx`
-- [ ] `src/renderer/Setup.tsx`
-- [ ] `docs/decisions.md`
-- [ ] `docs/architecture.md`
-- [ ] `docs/session-and-questions.md`
-- [ ] `docs/ipc-contract.md`
-- [ ] `README.md`
-- [ ] `docs/README.md`
+- ✅ `src/shared/mention.ts`
+- ✅ `scripts/mention-check.ts`
+- ✅ `package.json`
+- ✅ `src/shared/ipc.ts`
+- ✅ `src/main/settings-store.ts`
+- ✅ `src/main/rules-skills-service.ts`
+- ✅ `scripts/phase2-files-check.mjs`
+- ✅ `src/main/chat-session.ts`
+- ✅ `src/main/session-manager.ts`
+- ✅ `scripts/repos-check.ts`
+- ✅ `src/main/ipc.ts`
+- ✅ `src/main/index.ts`
+- ✅ `src/renderer/state.ts`
+- ✅ `src/renderer/MentionComposer.tsx`
+- ✅ `src/renderer/NewChat.tsx`
+- ✅ `src/renderer/RepoSidebar.tsx`
+- ✅ `src/renderer/styles.css`
+- ✅ `src/renderer/App.tsx`
+- ✅ `src/renderer/Chat.tsx`
+- ✅ `src/renderer/Instructions.tsx`
+- ✅ `src/renderer/RulesEditor.tsx`
+- ✅ `src/renderer/SkillsEditor.tsx`
+- ✅ `src/renderer/Setup.tsx`
+- ✅ `docs/decisions.md`
+- ✅ `docs/architecture.md`
+- ✅ `docs/session-and-questions.md`
+- ✅ `docs/ipc-contract.md`
+- ✅ `README.md`
+- ✅ `docs/README.md`
 
 ## Implementation Order
 
@@ -1909,18 +1941,20 @@ See **Documentation Update** below. Apply those edits and no others.
 
 ## Documentation Update
 
-### Step 12: Update Documentation (always the last step)
+### ✅ Step 12: Update Documentation (always the last step)
+
+Landed the decision, architecture, session, IPC, README, docs README, and package description edits, including the cap of 7 busy repo agents. The context diagram Folder label stays "Chosen folder": the plan names that change and does not give the new label. `npm run check:repos` passes via `scripts/repos-check-resolve.mjs`.
 
 **Affected documents**
 
 | Document | What changes | Status |
 |----------|--------------|--------|
-| `docs/decisions.md` | Replace D-5 and Q-1 with one chat per repo. Adjust the D-6 reason line. | todo |
-| `docs/architecture.md` | Workspace, `SessionManager`, one agent per repo, folder layout, out of scope. | todo |
-| `docs/session-and-questions.md` | Per-repo state, home screen, global busy rules. | todo |
-| `docs/ipc-contract.md` | `repo` on commands and events, `flow:repos.list`. | todo |
-| `README.md` | Workspace wording and the new checks. | todo |
-| `docs/README.md` | Opening description and the status line for the new checks. | todo |
+| `docs/decisions.md` | Replace D-5 and Q-1 with one chat per repo. Adjust the D-6 reason line. | done |
+| `docs/architecture.md` | Workspace, `SessionManager`, one agent per repo, folder layout, out of scope. | done |
+| `docs/session-and-questions.md` | Per-repo state, home screen, global busy rules. | done |
+| `docs/ipc-contract.md` | `repo` on commands and events, `flow:repos.list`. | done |
+| `README.md` | Workspace wording and the new checks. | done |
+| `docs/README.md` | Opening description and the status line for the new checks. | done |
 
 **Edits**
 
@@ -2053,3 +2087,11 @@ In Status, add that `npm run check:mentions` and `npm run check:repos` pass alon
 **Open questions**
 
 - Open question: should there be a global cap on how many repo agents run at once? **Answered (Valentin, 2026-11-06):** yes. The cap is 7 busy repo agents at once. Saved transcripts do not count. The 8th send is refused.
+
+## Review fixes
+
+Skipped unmentionable repo names, stopped a vanished running repo without a rescan, kept each sidebar row aligned with its chat slice, shared the busy cap and its messages, refreshed the repo list on home and after `not_found`, and covered the mention, sidebar, and concurrency checks.
+
+Second pass landed. `RepoSession.name()` and `isShuttingDown()` are gone, and `stop`, `answer`, and `skip` use `sessions.get`.
+
+parseMention no longer collapses indentation in the message body.

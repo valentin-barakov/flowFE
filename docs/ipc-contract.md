@@ -36,8 +36,8 @@ type ErrorCode =
 
 | Channel | Input | Output | Notes |
 |---------|-------|--------|-------|
-| `flow:settings.get` | none | `{ folder, model, theme, keySet, folderMissing, setupComplete }` | `theme` is `system`, `light`, or `dark`. `keySet` is a boolean. `folderMissing` is true when a folder path is saved and that path is no longer a directory |
-| `flow:settings.save` | `{ folder?, model?, theme? }` | settings | Changing `folder` switches to that folder's chat |
+| `flow:settings.get` | none | `{ folder, model, mode, theme, keySet, folderMissing, setupComplete }` | `mode` is `agent` or `plan`. `theme` is `system`, `light`, or `dark`. `keySet` is a boolean. `folderMissing` is true when a folder path is saved and that path is no longer a directory |
+| `flow:settings.save` | `{ folder?, model?, mode?, theme? }` | settings | Changing `folder` switches to that folder's chat. Changing `folder`, `model`, or `mode` is refused with `conflict` while any repo is busy |
 | `flow:key.set` | `{ key }` | `{}` | `key` is trimmed, then 1 to 500 characters. Encrypts with `safeStorage`; never returned |
 | `flow:key.clear` | none | `{}` | Renames `secrets.bin` aside. It does not return the key |
 | `flow:folder.pick` | none | `{ folder: string \| null }` | Opens the native dialog in main; `null` on cancel |
@@ -77,10 +77,10 @@ All events arrive on `flow:event` with a `type` discriminator and a `runId`. Eve
 |--------|---------|---------|
 | `chat.state` | `{ state }` | The state machine changed |
 | `chat.delta` | `{ messageId, text }` | Append `text` to the agent message |
-| `chat.tool` | `{ toolCallId, name, status: "running" \| "ok" \| "error", summary }` | A tool line; the same id updates its status |
+| `chat.tool` | `{ toolCallId, name, status: "running" \| "ok" \| "error", summary, offset?, plan?, truncated? }` | A tool line; the same id updates its status. `summary` is one short line built from the call's arguments (a path relative to the repo, a command, or a search pattern); it is empty when the arguments have no known key. The `ask_user_question` call has no tool line, because its question card is shown instead. `offset` is the number of characters of the agent message that existed when this call first appeared; later events for the same id repeat it. The window uses it to show text, tool calls, and cards in the order they happened. `plan` is the `createPlan` markdown, at most 200000 characters. `truncated` is true when that text was cut |
 | `chat.done` | `{ messageId, stopReason: "end" \| "stopped" }` | The run finished |
 | `chat.error` | `{ code, message, retryable }` | The run failed. The state returns to `ready`, or to `needsSetup` when setup is no longer complete |
-| `question.asked` | `{ questionId, title?, questions: Question[] }` | Show the form |
+| `question.asked` | `{ questionId, title?, questions: Question[], offset? }` | Show the form. `offset` is the number of characters of the agent message that existed when the question was asked, so the form sits under the text written before it |
 | `question.closed` | `{ questionId, reason: "answered" \| "skipped" \| "cancelled" }` | Disable the form |
 
 ```typescript
@@ -107,8 +107,8 @@ type Skill = SkillSummary & { body: string };
 type Message =
   | { id: string; role: "user"; text: string; at: string }
   | { id: string; role: "agent"; text: string; at: string; status: "done" | "stopped" | "interrupted" | "error" }
-  | { id: string; role: "tool"; name: string; summary: string; status: "ok" | "error"; at: string }
-  | { id: string; role: "question"; questionId: string; title?: string; questions: Question[]; answers: Answers | null; skipped: boolean; at: string };
+  | { id: string; role: "tool"; name: string; summary: string; status: "ok" | "error"; at: string; offset?: number; plan?: string; truncated?: boolean }
+  | { id: string; role: "question"; questionId: string; title?: string; questions: Question[]; answers: Answers | null; skipped: boolean; at: string; offset?: number };
 ```
 
 An agent message with `status: "interrupted"` is one that was streaming when the app quit or crashed; see [session-and-questions.md](session-and-questions.md).

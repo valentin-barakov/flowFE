@@ -1,5 +1,5 @@
 import { QuestionRejected, QUESTION_CANCELLED, type Answers, type AskUser } from "../shared/questions.js";
-import { BUSY_CAP_MESSAGE, MAX_BUSY_REPOS, type ChatStateName, type FlowEvent, type Message, type PendingQuestion, type RepoListItem, type Settings, type Theme } from "../shared/ipc.js";
+import { BUSY_CAP_MESSAGE, MAX_BUSY_REPOS, type AgentMode, type ChatStateName, type FlowEvent, type Message, type PendingQuestion, type RepoListItem, type Settings, type Theme } from "../shared/ipc.js";
 import { AgentCallError, type AgentService } from "./agent-service.js";
 import { createRepoSession, SessionError, type RepoSession } from "./chat-session.js";
 import type { RulesSkills } from "./rules-skills-service.js";
@@ -7,7 +7,7 @@ import type { RepoRecord, SettingsStore } from "./settings-store.js";
 
 export type SessionManager = {
   view(): Settings;
-  save(partial: { folder?: string; model?: string; theme?: Theme }): Promise<Settings>;
+  save(partial: { folder?: string; model?: string; mode?: AgentMode; theme?: Theme }): Promise<Settings>;
   setKey(key: string): Promise<void>;
   clearKey(): Promise<void>;
   listModels(): Promise<{ id: string; label: string }[]>;
@@ -100,8 +100,8 @@ export function createSessionManager(options: {
     return store.view();
   }
 
-  async function save(partial: { folder?: string; model?: string; theme?: Theme }): Promise<Settings> {
-    if ((partial.folder !== undefined || partial.model !== undefined) && anyBusy()) {
+  async function save(partial: { folder?: string; model?: string; mode?: AgentMode; theme?: Theme }): Promise<Settings> {
+    if ((partial.folder !== undefined || partial.model !== undefined || partial.mode !== undefined) && anyBusy()) {
       throw new SessionError("conflict", "Wait for every running agent to finish", false);
     }
     const previous = store.view().folder;

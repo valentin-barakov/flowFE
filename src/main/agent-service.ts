@@ -11,7 +11,10 @@ import {
   type SDKMessage,
   type SendOptions,
 } from "@cursor/sdk";
+import { PLAN_TEXT_MAX, type AgentMode } from "../shared/ipc.js";
+import { isCreatePlan } from "../shared/plan-markdown.js";
 import { parseToolQuestion, QuestionRejected, type AskUser } from "../shared/questions.js";
+import { toolDetail } from "./tool-summary.js";
 
 const RESUME_TIMEOUT_MS = 10_000;
 
@@ -36,7 +39,15 @@ export class AgentCallError extends Error {
 
 export type AgentStreamEvent =
   | { type: "delta"; text: string }
-  | { type: "tool"; toolCallId: string; name: string; status: "running" | "ok" | "error"; summary: string }
+  | {
+      type: "tool";
+      toolCallId: string;
+      name: string;
+      status: "running" | "ok" | "error";
+      summary: string;
+      plan?: string;
+      truncated?: boolean;
+    }
   | { type: "done"; stopReason: "end" | "stopped" }
   | { type: "error"; code: "auth" | "agent_error"; message: string; retryable: boolean };
 
@@ -47,12 +58,14 @@ type EnsureInput = {
   agentId: string | null;
   /** Skip the in-memory agent and Agent.resume so the next create reads the project files again. */
   fresh: boolean;
+  mode: AgentMode;
 };
 
 type SendInput = {
   apiKey: string;
   modelId: string;
   prompt: string;
+  mode: AgentMode;
   onEvent: (event: AgentStreamEvent) => void;
 };
 
@@ -140,6 +153,7 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
     try {
       run = await current.agent.send(input.prompt, {
         model: { id: input.modelId },
+        mode: input.mode,
         local: { customTools: questionTools(hooks.ask) },
       });
     } catch (error) {
@@ -150,7 +164,7 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
       throw new Cancelled();
     }
     activeRun = run;
-    void consume(run, input.apiKey, input.onEvent).finally(() => {
+    void consume(run, input.apiKey, current.cwd, input.onEvent).finally(() => {
       if (activeRun === run) activeRun = null;
     });
   }
@@ -256,6 +270,7 @@ function agentOptions(input: EnsureInput, ask: AskUser): AgentOptions {
   return {
     apiKey: input.apiKey,
     model: { id: input.modelId },
+    mode: input.mode,
     local: { cwd: input.cwd, settingSources, customTools: questionTools(ask) },
   };
 }
@@ -288,11 +303,11 @@ async function resumeWithTimeout(agentId: string, options: AgentOptions, ms: num
   });
 }
 
-async function consume(run: Run, secret: string, onEvent: (event: AgentStreamEvent) => void): Promise<void> {
+async function consume(run: Run, secret: string, cwd: string, onEvent: (event: AgentStreamEvent) => void): Promise<void> {
   let accumulated = "";
   try {
     for await (const message of run.stream()) {
-      emitMessage(message, accumulated, (next, event) => {
+      emitMessage(message, accumulated, cwd, (next, event) => {
         accumulated = next;
         if (event) onEvent(event);
       });
@@ -322,9 +337,10 @@ async function consume(run: Run, secret: string, onEvent: (event: AgentStreamEve
   }
 }
 
-function emitMessage(
+export function emitMessage(
   message: SDKMessage,
   accumulated: string,
+  cwd: string,
   emit: (accumulated: string, event: AgentStreamEvent | null) => void,
 ): void {
   if (message.type === "assistant") {
@@ -339,23 +355,42 @@ function emitMessage(
   }
   if (message.type !== "tool_call") return;
   const name = message.name.trim() === "" ? "tool" : message.name;
+  // The question card is how this call is shown, so it gets no tool line.
+  if (isQuestionTool(name, message.args) || isQuestionTool(name, message.result)) return;
   const toolCallId = message.call_id.trim() === "" ? `${name}-call` : message.call_id;
   const status = message.status === "completed" ? "ok" : message.status === "error" ? "error" : "running";
-  const raw = message.status === "running" ? message.args : (message.result ?? message.args);
+  const summary = isCreatePlan(name) ? planSummary(status) : toolDetail(message.args, cwd);
   emit(accumulated, {
     type: "tool",
     toolCallId,
     name,
     status,
-    summary: questionLine(name, status, raw) ?? summarize(raw),
+    summary,
+    ...planFields(name, message),
   });
 }
 
-function questionLine(name: string, status: "running" | "ok" | "error", value: unknown): string | null {
-  if (!isQuestionTool(name, value)) return null;
-  if (status === "running") return "Waiting for an answer";
-  if (status === "error") return "The question closed";
-  return "Answered";
+function planSummary(status: "running" | "ok" | "error"): string {
+  if (status === "running") return "Writing a plan";
+  if (status === "error") return "The plan failed";
+  return "Plan";
+}
+
+function planFields(name: string, message: Extract<SDKMessage, { type: "tool_call" }>): { plan?: string; truncated?: boolean } {
+  if (!isCreatePlan(name) || message.status !== "completed") return {};
+  const text = readPlan(message.args);
+  if (text === null) return {};
+  const over = text.length > PLAN_TEXT_MAX;
+  const plan = over ? text.slice(0, PLAN_TEXT_MAX) : text;
+  if (over || message.truncated?.args === true) return { plan, truncated: true };
+  return { plan };
+}
+
+function readPlan(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const plan = (value as { plan?: unknown }).plan;
+  if (typeof plan !== "string") return null;
+  return plan === "" ? null : plan;
 }
 
 function isQuestionTool(name: string, value: unknown): boolean {
@@ -367,32 +402,6 @@ function isQuestionTool(name: string, value: unknown): boolean {
     if (typeof item === "string" && item.includes("ask_user_question")) return true;
   }
   return false;
-}
-
-function summarize(value: unknown): string {
-  return clip(brief(value), 160);
-}
-
-function brief(value: unknown): string {
-  if (typeof value === "string") return value.replace(/\s+/g, " ").trim();
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    for (const key of ["command", "cmd", "path", "file_path", "target_file", "query", "pattern", "glob"]) {
-      const item = record[key];
-      if (typeof item === "string" && item.trim() !== "") return item.replace(/\s+/g, " ").trim();
-    }
-  }
-  if (value == null) return "";
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-}
-
-function clip(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
 }
 
 function translate(error: unknown, secret: string): AgentCallError {

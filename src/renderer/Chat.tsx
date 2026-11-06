@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import type { Answers, ChatStateName, Theme } from "../shared/ipc.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentMode, Answers, ChatStateName, Theme } from "../shared/ipc.js";
 import { Bot } from "./Bot.js";
+import { Markdown } from "./Markdown.js";
+import { PlanCard } from "./PlanCard.js";
 import { QuestionForm } from "./QuestionForm.js";
-import { modelChoices, ThemeSwitch } from "./Setup.js";
+import { buildBlocks, type Block } from "./segments.js";
+import { ModeSwitch, modelChoices, ThemeSwitch } from "./Setup.js";
 import type { Banner, Item, ModelChoice } from "./state.js";
+import { ToolStrip } from "./ToolStrip.js";
 
 type ChatProps = {
   repoName: string;
   workspaceBusy: boolean;
   folder: string;
   model: string;
+  mode: AgentMode;
   models: ModelChoice[];
   theme: Theme;
   items: Item[];
@@ -24,6 +29,7 @@ type ChatProps = {
   onSend: () => void;
   onStop: () => void;
   onTheme: (theme: Theme) => void;
+  onMode: (mode: AgentMode) => void;
   onModel: (model: string) => Promise<boolean>;
   onReset: () => void;
   onSetup: () => void;
@@ -41,6 +47,7 @@ export function Chat(props: ChatProps) {
   const stickRef = useRef(true);
   const waiting = props.chatState === "awaitingAnswer";
   const liveId = busy ? lastAgent(props.items) : null;
+  const blocks = useMemo(() => buildBlocks(props.items), [props.items]);
   const [confirmReset, setConfirmReset] = useState(false);
   const choices = modelChoices(props.models, props.model === "" ? null : props.model);
 
@@ -61,6 +68,7 @@ export function Chat(props: ChatProps) {
           </span>
         </div>
         <div className="spacer">
+          <ModeSwitch mode={props.mode} disabled={busy || props.workspaceBusy || props.pending} onMode={props.onMode} />
           <label className="sr" htmlFor="header-model">
             Model
           </label>
@@ -155,11 +163,11 @@ export function Chat(props: ChatProps) {
             <p>Messages start here. The agent works in this repo.</p>
           </div>
         ) : (
-          props.items.map((item) => (
-            <Row
-              key={item.role === "question" ? item.questionId : item.id}
-              item={item}
-              live={item.id === liveId}
+          blocks.map((block) => (
+            <BlockView
+              key={block.key}
+              block={block}
+              liveId={liveId}
               stopping={props.chatState === "stopping"}
               waiting={waiting}
               onAnswer={props.onAnswer}
@@ -208,22 +216,23 @@ export function Chat(props: ChatProps) {
   );
 }
 
-function Row({
-  item,
-  live,
+function BlockView({
+  block,
+  liveId,
   stopping,
   waiting,
   onAnswer,
   onSkip,
 }: {
-  item: Item;
-  live: boolean;
+  block: Block;
+  liveId: string | null;
   stopping: boolean;
   waiting: boolean;
   onAnswer: (questionId: string, answers: Answers) => Promise<string | null>;
   onSkip: (questionId: string) => Promise<string | null>;
 }) {
-  if (item.role === "question") {
+  if (block.kind === "question") {
+    const item = block.item;
     return (
       <QuestionForm
         {...(item.title !== undefined ? { title: item.title } : {})}
@@ -237,52 +246,67 @@ function Row({
       />
     );
   }
-  if (item.role === "tool") {
-    const phase = item.status === "ok" ? "finished" : item.status === "error" ? "failed" : "running";
-    const label = item.status === "ok" ? "done" : item.status === "error" ? "failed" : "running";
-    const text = [item.name, label, item.summary].filter((part) => part !== "").join(" · ");
+  if (block.kind === "plan") {
+    return <PlanCard markdown={block.plan} truncated={block.item.truncated === true} />;
+  }
+  if (block.kind === "tools") {
     return (
       <div className="tool-row">
-        <div className="tool" data-phase={phase}>
-          {text}
-        </div>
+        <ToolStrip tools={block.tools} live={block.agentId !== null && block.agentId === liveId} />
       </div>
     );
   }
-  if (item.role === "user") {
+  if (block.kind === "user") {
     return (
       <div className="bubble from-user">
         <Bot kind="user" />
         <div>
           <div className="who">You</div>
-          <p>{item.text}</p>
+          <p>{block.item.text}</p>
         </div>
       </div>
     );
   }
-  const status = live ? (stopping ? "stopping" : waiting ? "waiting" : "streaming") : item.status;
-  const showCaret = live && !stopping && !waiting;
+  const agent = block.agent;
+  const live = agent.id === liveId;
+  const running = live && !stopping && !waiting;
+  const status = live ? (stopping ? "stopping" : waiting ? "waiting" : "streaming") : agent.status;
+  const empty = block.text === "";
+  const note = block.last && !live ? endNote(agent.status, empty) : null;
+  if (empty && !(block.last && live) && note === null) return null;
   return (
     <div className="bubble from-agent">
-      <Bot kind="agent" running={live && !stopping && !waiting} />
+      {block.header ? <Bot kind="agent" running={running} /> : <span aria-hidden="true" />}
       <div>
-        <div className="who">
-          Mango
-          {status === "done" ? null : (
-            <span className="pill" data-status={status === "streaming" || status === "stopping" || status === "waiting" ? "running" : status}>
-              {status === "streaming" ? "streaming" : status === "stopping" ? "stopping" : status === "waiting" ? "waiting" : status}
-            </span>
-          )}
-        </div>
-        {item.text === "" && live ? (
-          <p className="meta">{waiting ? "Waiting for an answer" : "Working…"}</p>
+        {block.header ? (
+          <div className="who">
+            Mango
+            {status === "done" ? null : (
+              <span className="pill" data-status={live ? "running" : status}>
+                {status}
+              </span>
+            )}
+          </div>
+        ) : null}
+        {empty ? (
+          live ? (
+            <p className="meta">{waiting ? "Waiting for an answer" : "Working…"}</p>
+          ) : null
         ) : (
-          <p className={showCaret ? "caret" : undefined}>{item.text}</p>
+          <Markdown text={block.text} live={running && block.last} />
         )}
-        {item.status === "interrupted" && !live ? <p className="meta">Interrupted when the app closed</p> : null}
+        {note !== null ? <p className="meta">{note}</p> : null}
       </div>
     </div>
   );
+}
+
+function endNote(status: "done" | "stopped" | "interrupted" | "error", empty: boolean): string | null {
+  if (status === "interrupted") return "Interrupted when the app closed";
+  if (!empty) return null;
+  if (status === "stopped") return "Stopped";
+  if (status === "error") return "The run failed";
+  return null;
 }
 
 function lastAgent(items: readonly Item[]): string | null {

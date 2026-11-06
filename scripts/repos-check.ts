@@ -1,7 +1,7 @@
 // Checks repo discovery, two sessions at once, and the cap of 7. No Electron and no SDK.
 //   node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/repos-check.ts
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -83,6 +83,24 @@ test("a symlink to a repo is not a second repo", () => {
     assert.equal(repos.length, 1);
     assert.equal(repos[0]?.name, "alias");
     assert.equal(repos[0]?.path, realpathSync(path.join(root, "api")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a settings file without mode reads as agent, and a theme save keeps plan", () => {
+  const root = workspace();
+  try {
+    const dir = path.join(root, "data");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ folder: null, model: null, theme: "system" }));
+    const store = createSettingsStore({ userDataDir: dir, secrets });
+    assert.equal(store.view().mode, "agent");
+    store.save({ mode: "plan" });
+    assert.equal(store.view().mode, "plan");
+    store.save({ theme: "dark" });
+    assert.equal(store.view().mode, "plan");
+    assert.equal(store.view().theme, "dark");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -191,6 +209,99 @@ test("an eighth busy repo is refused", async () => {
   }
 });
 
+test("a tool line records where in the text it started", async () => {
+  const root = workspace();
+  try {
+    gitRepo(path.join(root, "api"));
+    const store = createSettingsStore({ userDataDir: path.join(root, "data"), secrets });
+    store.save({ folder: root, model: "composer" });
+    store.setKey("test-key");
+    const events: FlowEvent[] = [];
+    const manager = createSessionManager({
+      store,
+      files: { seenDirty: () => 0, clearDirty: () => undefined },
+      emit: (event) => events.push(event),
+      listModels: async () => [],
+      createAgents(): AgentService {
+        return {
+          prepare() {},
+          async listModels() {
+            return [];
+          },
+          async ensure() {
+            return { agentId: "agent-1", restored: false };
+          },
+          async beginSend(input) {
+            input.onEvent({ type: "delta", text: "Hello" });
+            input.onEvent({ type: "tool", toolCallId: "t1", name: "read", status: "running", summary: "a.ts" });
+            // Text arrives while the tool runs. The finished event must keep the first offset.
+            input.onEvent({ type: "delta", text: " world" });
+            input.onEvent({ type: "tool", toolCallId: "t1", name: "read", status: "ok", summary: "a.ts" });
+            input.onEvent({ type: "done", stopReason: "end" });
+          },
+          async cancel() {},
+          async dispose() {},
+        };
+      },
+    });
+    await manager.send("api", "hi");
+    const offsets = events.flatMap((event) => (event.type === "chat.tool" ? [event.offset] : []));
+    assert.deepEqual(offsets, [5, 5]);
+    const messages = store.readChat(path.join(root, "api")).messages;
+    const stored = messages.find((message) => message.role === "tool");
+    assert.equal(stored?.role === "tool" ? stored.offset : undefined, 5);
+    const agent = messages.find((message) => message.role === "agent");
+    assert.equal(agent?.role === "agent" ? agent.text : undefined, "Hello world");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a question records where in the text it was asked", async () => {
+  const root = workspace();
+  try {
+    gitRepo(path.join(root, "api"));
+    const store = createSettingsStore({ userDataDir: path.join(root, "data"), secrets });
+    store.save({ folder: root, model: "composer" });
+    store.setKey("test-key");
+    const events: FlowEvent[] = [];
+    const manager = createSessionManager({
+      store,
+      files: { seenDirty: () => 0, clearDirty: () => undefined },
+      emit: (event) => events.push(event),
+      listModels: async () => [],
+      createAgents(ask: AskUser): AgentService {
+        return {
+          prepare() {},
+          async listModels() {
+            return [];
+          },
+          async ensure() {
+            return { agentId: "agent-1", restored: false };
+          },
+          async beginSend(input) {
+            input.onEvent({ type: "delta", text: "Hi" });
+            await ask({ questions: [{ id: "q", prompt: "Pick", options: [{ id: "yes", label: "Yes" }] }] });
+            input.onEvent({ type: "done", stopReason: "end" });
+          },
+          async cancel() {},
+          async dispose() {},
+        };
+      },
+    });
+    const sent = manager.send("api", "hello");
+    const pending = await waitFor(() => manager.state("api").pendingQuestion);
+    manager.answer("api", pending.questionId, { q: { selected: ["yes"] } });
+    await sent;
+    const asked = events.flatMap((event) => (event.type === "question.asked" ? [event.offset] : []));
+    assert.deepEqual(asked, [2]);
+    const question = store.readChat(path.join(root, "api")).messages.find((message) => message.role === "question");
+    assert.equal(question?.role === "question" ? question.offset : undefined, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an unknown repo name is refused", async () => {
   const root = workspace();
   try {
@@ -210,6 +321,19 @@ test("saving the model is refused while a repo is busy", async () => {
     void manager.send("api", "hello");
     await waitFor(() => (manager.state("api").state === "streaming" ? true : null));
     await assert.rejects(manager.save({ model: "other" }), (error: unknown) => error instanceof SessionError && error.code === "conflict");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("saving the mode is refused while a repo is busy", async () => {
+  const root = workspace();
+  try {
+    gitRepo(path.join(root, "api"));
+    const manager = hangingManager(root);
+    void manager.send("api", "hello");
+    await waitFor(() => (manager.state("api").state === "streaming" ? true : null));
+    await assert.rejects(manager.save({ mode: "plan" }), (error: unknown) => error instanceof SessionError && error.code === "conflict");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { MessageSchema, type Message, type Settings, type Theme } from "../shared/ipc.js";
+import { MessageSchema, type AgentMode, type Message, type Settings, type Theme } from "../shared/ipc.js";
 
 export type SecretBox = {
   isEncryptionAvailable(): boolean;
@@ -14,6 +14,7 @@ export type SecretBox = {
 type SettingsFile = {
   folder: string | null;
   model: string | null;
+  mode: AgentMode;
   theme: Theme;
 };
 
@@ -25,6 +26,7 @@ type ChatFile = {
 const SettingsFileSchema = z.object({
   folder: z.string().nullable(),
   model: z.string().nullable(),
+  mode: z.enum(["agent", "plan"]).default("agent"),
   theme: z.enum(["system", "light", "dark"]),
 });
 
@@ -33,7 +35,7 @@ const ChatFileSchema = z.object({
   messages: z.array(MessageSchema),
 });
 
-const EMPTY_SETTINGS: SettingsFile = { folder: null, model: null, theme: "system" };
+const EMPTY_SETTINGS: SettingsFile = { folder: null, model: null, mode: "agent", theme: "system" };
 const EMPTY_CHAT: ChatFile = { agentId: null, messages: [] };
 
 function serialize(value: unknown): string {
@@ -47,7 +49,7 @@ export type RepoRecord = { name: string; path: string };
 
 export type SettingsStore = {
   view(): Settings;
-  save(partial: { folder?: string; model?: string; theme?: Theme }): Settings;
+  save(partial: { folder?: string; model?: string; mode?: AgentMode; theme?: Theme }): Settings;
   setKey(key: string): void;
   clearKey(): void;
   readKey(): string | null;
@@ -74,6 +76,7 @@ export function createSettingsStore(options: { userDataDir: string; secrets: Sec
     return {
       folder: file.folder,
       model: file.model,
+      mode: file.mode,
       theme: file.theme,
       keySet,
       folderMissing: file.folder !== null && !folderOk,
@@ -81,11 +84,12 @@ export function createSettingsStore(options: { userDataDir: string; secrets: Sec
     };
   }
 
-  function save(partial: { folder?: string; model?: string; theme?: Theme }): Settings {
+  function save(partial: { folder?: string; model?: string; mode?: AgentMode; theme?: Theme }): Settings {
     const current = readSettings();
     const next: SettingsFile = {
       folder: partial.folder === undefined ? current.folder : resolveFolder(partial.folder),
       model: partial.model === undefined ? current.model : partial.model,
+      mode: partial.mode === undefined ? current.mode : partial.mode,
       theme: partial.theme === undefined ? current.theme : partial.theme,
     };
     writeJson(settingsPath, next);
