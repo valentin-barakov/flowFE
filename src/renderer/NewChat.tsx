@@ -5,16 +5,29 @@ type NewChatProps = {
   draft: string;
   notice: string | null;
   pending: boolean;
+  pickFolder: boolean;
   onDraft: (draft: string) => void;
   onSend: () => void;
 };
 
-export function NewChat({ repos, draft, notice, pending, onDraft, onSend }: NewChatProps) {
+export function NewChat({
+  repos,
+  draft,
+  notice,
+  pending,
+  pickFolder,
+  onDraft,
+  onSend,
+}: NewChatProps) {
   return (
     <section className="home">
       <div className="titles">
         <h2>New chat</h2>
-        <p className="lead">Type @ and a repo name. The agent runs in that repo.</p>
+        <p className="lead">
+          {pickFolder
+            ? "Type the folder name after @, pick it from the list, then Send."
+            : "Type @ and a repo name. The agent runs in that repo."}
+        </p>
       </div>
       {notice ? <p className="notice">{notice}</p> : null}
       <form
@@ -33,6 +46,7 @@ export function NewChat({ repos, draft, notice, pending, onDraft, onSend }: NewC
           repos={repos}
           disabled={pending}
           placeholder="Message a repo with @api"
+          autoFocus={pickFolder}
           onChange={onDraft}
           onSend={onSend}
         />

@@ -15,6 +15,7 @@
     "check:mentions": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/mention-check.ts",
     "check:repos": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/repos-check.ts",
     "check:sidebar": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/sidebar-check.ts",
+    "check:fruits": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/fruits-check.ts",
     "check:plan": "node --disable-warning=ExperimentalWarning --experimental-strip-types scripts/plan-check.ts",
     "check:tools": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/tool-summary-check.ts",
     "check:segments": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/repos-check-resolve.mjs scripts/segments-check.ts",

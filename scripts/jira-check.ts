@@ -22,11 +22,13 @@ import {
 import {
   ASSIGNED_JQL,
   ISSUE_KEY,
+  implementPrompt,
   issueBrowseUrl,
   jiraReady,
   jiraSiteOrigin,
   JIRA_PAGE_SIZE,
   siteLabel,
+  ticketColumn,
 } from "../src/shared/jira.ts";
 import {
   createJiraService,
@@ -62,7 +64,10 @@ const ISSUE_ROW = {
   key: "ABC-1",
   fields: {
     summary: "Fix it",
-    status: { name: "In Progress" },
+    status: {
+      name: "In Progress",
+      statusCategory: { name: "In Progress" },
+    },
     issuetype: { name: "Bug" },
     project: { name: "Alpha" },
     updated: "2026-11-06T10:00:00.000+0000",
@@ -195,6 +200,7 @@ test("a search response keeps good rows and the next-page token", () => {
         key: "ABC-1",
         summary: "Fix it",
         status: "In Progress",
+        statusCategory: "In Progress",
         type: "Bug",
         project: "Alpha",
         updated: "2026-11-06T10:00:00.000+0000",
@@ -204,6 +210,30 @@ test("a search response keeps good rows and the next-page token", () => {
   });
   assert.equal(parseSearchResponse({ issues: [] })?.nextPageToken, null);
   assert.equal(parseSearchResponse("nope"), null);
+});
+
+test("Implement opens New chat with the ticket prompt and asks for a folder", () => {
+  const text = implementPrompt("https://acme.atlassian.net/browse/ABC-1");
+  assert.equal(text, "implement ticket https://acme.atlassian.net/browse/ABC-1 @");
+  const opened = reducer(app({ jiraOpen: true }), { type: "implement-ticket", text });
+  assert.equal(opened.jiraOpen, false);
+  assert.equal(screenOf(opened), "home");
+  assert.equal(opened.homeDraft, text);
+  assert.equal(opened.homeNotice, null);
+  assert.equal(opened.homePickFolder, true);
+  assert.equal(reducer(opened, { type: "open-home" }).homePickFolder, false);
+});
+
+test("tickets land in To Do, In Progress, or In Review", () => {
+  assert.equal(ticketColumn("To Do", "To Do"), "todo");
+  assert.equal(ticketColumn("Scoping", "To Do"), "todo");
+  assert.equal(ticketColumn("Scoping", ""), "todo");
+  assert.equal(ticketColumn("In Progress", "In Progress"), "progress");
+  assert.equal(ticketColumn("Blocked", "In Progress"), "progress");
+  assert.equal(ticketColumn("Code review", "In Progress"), "review");
+  assert.equal(ticketColumn("In Review", "In Progress"), "review");
+  assert.equal(ticketColumn("Ready for review", ""), "review");
+  assert.equal(ticketColumn("Mystery", ""), "progress");
 });
 
 test("save, search, a site change, open, and clear", async () => {

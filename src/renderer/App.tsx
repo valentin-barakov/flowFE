@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   BUSY_CAP_MESSAGE,
   MAX_BUSY_REPOS,
@@ -14,6 +14,7 @@ import {
 } from "../shared/ipc.js";
 import { parseMention } from "../shared/mention.js";
 import { Chat } from "./Chat.js";
+import { assignChatFruits, loadFruitMemory, saveFruitMemory, type ChatFruit } from "./fruits.js";
 import { Instructions } from "./Instructions.js";
 import type { JiraSetupProps } from "./JiraSetup.js";
 import { JiraTickets } from "./JiraTickets.js";
@@ -37,6 +38,15 @@ export function App() {
   stateRef.current = state;
   const screen = screenOf(state);
   const hasSidebar = state.repos.length > 1;
+  const rows = sidebarRows(state);
+  const chatNamesKey = rows.map((row) => row.name).join("\0");
+  const assignedFruits = useMemo(
+    () => assignChatFruits(chatNamesKey === "" ? [] : chatNamesKey.split("\0"), loadFruitMemory()),
+    [chatNamesKey],
+  );
+  useEffect(() => {
+    saveFruitMemory(assignedFruits.memory);
+  }, [assignedFruits]);
   // Jira covers chat, New chat, or Rules. The model list follows that screen, so opening Jira does not refetch.
   const modelsScreen =
     screen === "jira"
@@ -543,6 +553,7 @@ export function App() {
         onBannerSetup={() => dispatch({ type: "edit-setup" })}
         onAnswer={answer}
         onSkip={skip}
+        fruit={fruitFor(repoName)}
       />
     );
   }
@@ -565,12 +576,17 @@ export function App() {
 
   const settings = state.settings;
   const repo = state.view.kind === "repo" ? state.view.repo : state.repos.length === 1 ? (state.repos[0]?.name ?? null) : null;
+  function fruitFor(name: string): ChatFruit {
+    const index = rows.findIndex((row) => row.name === name);
+    return assignedFruits.fruits[index] ?? "mango";
+  }
   const home = (
     <NewChat
       repos={state.repos.map((row) => row.name)}
       draft={state.homeDraft}
       notice={state.homeNotice}
       pending={pending}
+      pickFolder={state.homePickFolder}
       onDraft={(draft) => dispatch({ type: "home-draft", draft })}
       onSend={() => void sendHome()}
     />
@@ -587,6 +603,7 @@ export function App() {
       status={jira}
       onBack={() => dispatch({ type: "close-jira" })}
       onSetup={() => dispatch({ type: "edit-setup" })}
+      onImplement={(text) => dispatch({ type: "implement-ticket", text })}
     />
   );
 
@@ -634,7 +651,8 @@ export function App() {
       ) : hasSidebar ? (
         <div className="shell">
           <RepoSidebar
-            rows={sidebarRows(state)}
+            rows={rows}
+            fruits={assignedFruits.fruits}
             pending={pending}
             jiraActive={state.jiraOpen}
             onOpen={(name) => void openChat(name)}

@@ -182,6 +182,8 @@ export const JiraIssueSchema = z.object({
   key: IssueKeySchema,
   summary: z.string(),
   status: z.string(),
+  /** Jira status category name, such as "To Do" or "In Progress". Empty when Jira omits it. */
+  statusCategory: z.string(),
   type: z.string(),
   project: z.string(),
   updated: z.string(),

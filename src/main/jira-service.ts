@@ -50,7 +50,12 @@ const ApiIssueSchema = z.object({
   fields: z.object({
     summary: z.string().nullish(),
     updated: z.string().nullish(),
-    status: z.object({ name: z.string() }).nullish(),
+    status: z
+      .object({
+        name: z.string(),
+        statusCategory: z.object({ name: z.string() }).nullish(),
+      })
+      .nullish(),
     issuetype: z.object({ name: z.string() }).nullish(),
     project: z.object({ name: z.string() }).nullish(),
   }),
@@ -97,6 +102,7 @@ export function parseSearchResponse(
       key: row.data.key,
       summary: clip(fields.summary ?? "", 500),
       status: clip(fields.status?.name ?? "", 100),
+      statusCategory: clip(fields.status?.statusCategory?.name ?? "", 40),
       type: clip(fields.issuetype?.name ?? "", 100),
       project: clip(fields.project?.name ?? "", 200),
       updated: clip(fields.updated ?? "", 60),

@@ -7,11 +7,21 @@ type MentionComposerProps = {
   repos: readonly string[];
   disabled: boolean;
   placeholder: string;
+  autoFocus?: boolean;
   onChange: (value: string) => void;
   onSend: () => void;
 };
 
-export function MentionComposer({ id, value, repos, disabled, placeholder, onChange, onSend }: MentionComposerProps) {
+export function MentionComposer({
+  id,
+  value,
+  repos,
+  disabled,
+  placeholder,
+  autoFocus = false,
+  onChange,
+  onSend,
+}: MentionComposerProps) {
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -31,6 +41,17 @@ export function MentionComposer({ id, value, repos, disabled, placeholder, onCha
     caretAfter.current = null;
     node.setSelectionRange(cursor, cursor);
   }, [value]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const node = area.current;
+    if (node === null) return;
+    const end = node.value.length;
+    node.focus();
+    node.setSelectionRange(end, end);
+    setCaret(end);
+    setOpen(true);
+  }, [autoFocus]);
 
   function choose(name: string): void {
     if (query === null) return;
@@ -73,6 +94,7 @@ export function MentionComposer({ id, value, repos, disabled, placeholder, onCha
         aria-activedescendant={activeId}
         rows={2}
         placeholder={placeholder}
+        autoFocus={autoFocus}
         value={value}
         disabled={disabled}
         onChange={(event) => {

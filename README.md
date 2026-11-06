@@ -39,6 +39,7 @@ npm run check:questions
 npm run check:mentions
 npm run check:repos
 npm run check:sidebar
+npm run check:fruits
 npm run check:plan
 npm run check:segments
 npm run check:tools
@@ -47,4 +48,4 @@ npm run check:jira
 
 Question-argument parsing is covered by `npm run check:questions`. File-path checks live in `scripts/phase2-files-check.mjs`.
 
-`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos`, `check:segments`, and `check:tools` use `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`. `check:jira` covers the site check, the issue key, the search request (Basic auth, the JQL, and the page token), and the renderer state that opens and closes the ticket list. The live list needs a real API token and is checked by hand.
+`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:fruits` covers which fruit icon a chat keeps, and that two chats one above the other do not share one. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos`, `check:segments`, and `check:tools` use `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`. `check:jira` covers the site check, the issue key, the search request (Basic auth, the JQL, and the page token), and the renderer state that opens and closes the ticket list. The live list needs a real API token and is checked by hand.

@@ -72,6 +72,8 @@ export type AppState = {
   chats: Record<string, ChatSlice>;
   homeDraft: string;
   homeNotice: string | null;
+  /** New chat is showing folder buttons for an Implement draft. */
+  homePickFolder: boolean;
 };
 
 export function emptySlice(): ChatSlice {
@@ -211,6 +213,8 @@ export type Action =
     }
   | { type: "home-draft"; draft: string }
   | { type: "home-notice"; notice: string | null }
+  /** Leave Jira for New chat, with the ticket prompt already in the box. */
+  | { type: "implement-ticket"; text: string }
   | { type: "draft"; repo: string; draft: string }
   | { type: "sending"; repo: string; text: string }
   | { type: "banner"; repo: string; banner: Banner | null }
@@ -246,6 +250,7 @@ export const initialState: AppState = {
   chats: {},
   homeDraft: "",
   homeNotice: null,
+  homePickFolder: false,
 };
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -293,6 +298,7 @@ export function reducer(state: AppState, action: Action): AppState {
         chats: folderChanged ? {} : state.chats,
         view: folderChanged ? viewForRepos(action.repos) : state.view,
         banner: folderChanged || becameMissing ? (action.settings.folderMissing ? folderBanner() : null) : state.banner,
+        homePickFolder: folderChanged ? false : state.homePickFolder,
       };
     }
     case "models":
@@ -325,7 +331,23 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "open-home":
-      return { ...state, view: { kind: "home" }, instructionsOpen: false, jiraOpen: false };
+      return {
+        ...state,
+        view: { kind: "home" },
+        instructionsOpen: false,
+        jiraOpen: false,
+        homePickFolder: false,
+      };
+    case "implement-ticket":
+      return {
+        ...state,
+        view: { kind: "home" },
+        instructionsOpen: false,
+        jiraOpen: false,
+        homeDraft: action.text,
+        homeNotice: null,
+        homePickFolder: true,
+      };
     case "open-repo": {
       const current = state.chats[action.repo] ?? emptySlice();
       return {

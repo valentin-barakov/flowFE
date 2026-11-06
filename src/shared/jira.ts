@@ -43,6 +43,11 @@ export function issueBrowseUrl(site: string, key: string): string | null {
   return origin === null ? null : `${origin}/browse/${key}`;
 }
 
+/** New chat draft for the Implement button. The trailing @ is where the folder name goes. */
+export function implementPrompt(url: string): string {
+  return `implement ticket ${url} @`;
+}
+
 /** True when Setup has an email, a site, and a saved token. The pane loads tickets only then. */
 export function jiraReady(
   status: {
@@ -54,6 +59,42 @@ export function jiraReady(
   return (
     status?.tokenSet === true && status.email !== null && status.site !== null
   );
+}
+
+export type TicketColumn = "todo" | "progress" | "review";
+
+export const TICKET_COLUMNS: { id: TicketColumn; label: string }[] = [
+  { id: "todo", label: "To Do" },
+  { id: "progress", label: "In Progress" },
+  { id: "review", label: "In Review" },
+];
+
+const TODO_NAMES = new Set([
+  "to do",
+  "todo",
+  "open",
+  "backlog",
+  "new",
+  "scoping",
+  "selected for development",
+]);
+
+/**
+ * Column for one ticket.
+ * A status whose name contains "review" (Code review, In Review) is In Review.
+ * Otherwise the Jira status category decides: "To Do" is To Do, and every other
+ * category is In Progress. When the category is missing, a few common To Do names
+ * still land in To Do.
+ */
+export function ticketColumn(status: string, statusCategory: string): TicketColumn {
+  const name = status.trim().toLowerCase();
+  if (name.includes("review")) return "review";
+  const category = statusCategory.trim().toLowerCase();
+  if (category === "to do" || category === "new") return "todo";
+  if (category === "") {
+    if (TODO_NAMES.has(name)) return "todo";
+  }
+  return "progress";
 }
 
 /** The site name shown in the pane header, such as `acme` from `https://acme.atlassian.net`. */

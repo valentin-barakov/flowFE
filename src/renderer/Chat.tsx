@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode, Answers, ChatStateName, Theme } from "../shared/ipc.js";
 import { Bot } from "./Bot.js";
+import type { ChatFruit } from "./fruits.js";
 import { Markdown } from "./Markdown.js";
 import { PlanCard } from "./PlanCard.js";
 import { QuestionForm } from "./QuestionForm.js";
@@ -42,6 +43,7 @@ type ChatProps = {
   onBannerSetup: () => void;
   onAnswer: (questionId: string, answers: Answers) => Promise<string | null>;
   onSkip: (questionId: string) => Promise<string | null>;
+  fruit: ChatFruit;
 };
 
 export function Chat(props: ChatProps) {
@@ -63,7 +65,7 @@ export function Chat(props: ChatProps) {
   return (
     <section className="chat">
       <div className="thread-head">
-        <Bot kind="agent" running={busy} />
+        <Bot kind="agent" fruit={props.fruit} running={busy} />
         <div className="titles">
           <h2>Mango</h2>
           <span className="meta" title={props.repoName === "." ? props.folder : props.repoName}>
@@ -92,8 +94,15 @@ export function Chat(props: ChatProps) {
             ))}
           </select>
           <ThemeSwitch theme={props.theme} onTheme={props.onTheme} />
-          <button type="button" className="btn" disabled={busy || props.pending} onClick={() => setConfirmReset(true)}>
-            Reset chat
+          <button
+            type="button"
+            className="btn icon-btn"
+            title="Reset chat"
+            aria-label="Reset chat"
+            disabled={busy || props.pending}
+            onClick={() => setConfirmReset(true)}
+          >
+            <TrashIcon />
           </button>
           {props.onJira ? (
             <button type="button" className="btn" onClick={props.onJira}>
@@ -103,8 +112,15 @@ export function Chat(props: ChatProps) {
           <button type="button" className="btn" onClick={props.onInstructions}>
             Rules
           </button>
-          <button type="button" className="btn" disabled={busy || props.workspaceBusy} onClick={props.onSetup}>
-            Setup
+          <button
+            type="button"
+            className="btn icon-btn"
+            title="Setup"
+            aria-label="Setup"
+            disabled={busy || props.workspaceBusy}
+            onClick={props.onSetup}
+          >
+            <GearIcon />
           </button>
         </div>
       </div>
@@ -166,7 +182,7 @@ export function Chat(props: ChatProps) {
       >
         {props.items.length === 0 ? (
           <div className="empty">
-            <Bot kind="agent" large />
+            <Bot kind="agent" fruit={props.fruit} large />
             <h2>No messages yet</h2>
             <p>Messages start here. The agent works in this repo.</p>
           </div>
@@ -180,6 +196,7 @@ export function Chat(props: ChatProps) {
               selectedModel={props.model}
               stopping={props.chatState === "stopping"}
               waiting={waiting}
+              fruit={props.fruit}
               onAnswer={props.onAnswer}
               onSkip={props.onSkip}
             />
@@ -233,6 +250,7 @@ function BlockView({
   selectedModel,
   stopping,
   waiting,
+  fruit,
   onAnswer,
   onSkip,
 }: {
@@ -242,6 +260,7 @@ function BlockView({
   selectedModel: string;
   stopping: boolean;
   waiting: boolean;
+  fruit: ChatFruit;
   onAnswer: (questionId: string, answers: Answers) => Promise<string | null>;
   onSkip: (questionId: string) => Promise<string | null>;
 }) {
@@ -300,7 +319,7 @@ function BlockView({
   if (empty && !(block.last && live) && note === null) return null;
   return (
     <div className="bubble from-agent">
-      {block.header ? <Bot kind="agent" running={running} /> : <span aria-hidden="true" />}
+      {block.header ? <Bot kind="agent" fruit={fruit} running={running} /> : <span aria-hidden="true" />}
       <div>
         {block.header ? (
           <div className="who">
@@ -339,6 +358,28 @@ function lastAgent(items: readonly Item[]): string | null {
     if (item?.role === "agent") return item.id;
   }
   return null;
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3.2 4.4h9.6" />
+      <path d="M6.3 4.4V3.2a.7.7 0 0 1 .7-.7h2a.7.7 0 0 1 .7.7v1.2" />
+      <path d="M4.5 4.4l.5 8a.8.8 0 0 0 .8.7h4.4a.8.8 0 0 0 .8-.7l.5-8" />
+      <path d="M6.8 6.7v3.8M9.2 6.7v3.8" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2 4.2h12M2 8h12M2 11.8h12" />
+      <circle cx="5.2" cy="4.2" r="1.35" />
+      <circle cx="10.8" cy="8" r="1.35" />
+      <circle cx="6.4" cy="11.8" r="1.35" />
+    </svg>
+  );
 }
 
 function folderName(folder: string): string {
