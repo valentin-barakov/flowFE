@@ -6,6 +6,7 @@ import {
   type AgentMode,
   type Answers,
   type ChatStateName,
+  type Failure,
   type FlowEvent,
   type GithubProjectRef,
   type GithubStatus,
@@ -27,7 +28,22 @@ import { JiraTickets } from "./JiraTickets.js";
 import { NewChat } from "./NewChat.js";
 import { RepoSidebar } from "./RepoSidebar.js";
 import { Setup } from "./Setup.js";
-import { anyBusy, bannerFor, busyRepoNames, canRetry, emptySlice, initialState, isBusyState, reducer, screenOf, shouldLeaveAfterReset, sidebarRows, type Banner, type PaneKey } from "./state.js";
+import {
+  anyBusy,
+  bannerFor,
+  busyRepoNames,
+  canRetry,
+  emptySlice,
+  initialState,
+  isBusyState,
+  reducer,
+  reviewPhase,
+  screenOf,
+  shouldLeaveAfterReset,
+  sidebarRows,
+  type Banner,
+  type PaneKey,
+} from "./state.js";
 
 type HeldEvents = { hold: boolean; events: FlowEvent[] };
 
@@ -306,7 +322,8 @@ export function App() {
     return chat.value.state;
   }
 
-  async function sendRepo(repo: string, text: string): Promise<void> {
+  /** Resolves to the failure, or null when the run started. `restoreDraft: false` keeps the failed text out of the chat box. */
+  async function sendRepo(repo: string, text: string, options: { restoreDraft?: boolean } = {}): Promise<Failure | null> {
     const box = bucket(repo);
     box.hold = true;
     dispatch({ type: "sending", repo, text });
@@ -328,11 +345,11 @@ export function App() {
         banner: bannerFrom(result.error),
       });
       if (result.error.code === "not_found") void refreshRepos();
-      if (!messages.some((message) => message.role === "user" && message.text === text)) {
+      if (options.restoreDraft !== false && !messages.some((message) => message.role === "user" && message.text === text)) {
         dispatch({ type: "draft", repo, draft: text });
       }
       replayHold(queued);
-      return;
+      return result.error;
     }
     const queued = drainHold(box);
     setPending(false);
@@ -346,6 +363,28 @@ export function App() {
       restored: result.value.restored,
     });
     replayHold(queued);
+    return null;
+  }
+
+  /** The Review button on a pull request card. Resolves to an error text, or null when the run started. */
+  async function startReview(repo: string, text: string): Promise<string | null> {
+    const running = busyRepoNames(stateRef.current);
+    if (running.includes(repo)) return busyRepoMessage(repo);
+    if (running.length >= MAX_BUSY_REPOS) return BUSY_CAP_MESSAGE;
+    if (stateRef.current.chats[repo]?.loaded !== true) {
+      const loaded = await loadRepo(repo);
+      if (loaded !== null && isBusyState(loaded)) return busyRepoMessage(repo);
+    }
+    const failure = await sendRepo(repo, text, { restoreDraft: false });
+    return failure === null ? null : failure.message;
+  }
+
+  /** The pull request pane shows a spinner from that repo's chat, so a repo already running needs its chat loaded. */
+  function watchRepo(repo: string): void {
+    const row = stateRef.current.repos.find((item) => item.name === repo);
+    if (row === undefined || !isBusyState(row.state)) return;
+    if (stateRef.current.chats[repo]?.loaded === true) return;
+    void loadRepo(repo);
   }
 
   async function refreshRepos(cancelled?: () => boolean): Promise<void> {
@@ -679,6 +718,12 @@ export function App() {
       status={github}
       onBack={() => dispatch({ type: "close-github-prs" })}
       onSetup={() => dispatch({ type: "edit-setup" })}
+      reviewPhase={(checkout, prompt) =>
+        reviewPhase(state.chats[checkout], prompt)
+      }
+      onReview={startReview}
+      onOpenChat={(checkout) => void openChat(checkout)}
+      onWatch={watchRepo}
     />
   );
   const githubProjectsPane = (

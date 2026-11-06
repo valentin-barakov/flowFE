@@ -257,6 +257,8 @@ export const GithubPrSchema = z.object({
   ci: z.enum(["passing", "failing", "pending"]).nullable(),
   /** True when the local checkout has pr-reviews/<number>.md. */
   hasReview: z.boolean(),
+  /** The `## Verdict` word in that file. Null when the file is missing or has no Yes or No. */
+  verdict: z.enum(["yes", "no"]).nullable(),
 });
 export type GithubPr = z.infer<typeof GithubPrSchema>;
 
@@ -264,6 +266,8 @@ export const GithubPrsResultSchema = z.object({
   prs: z.array(GithubPrSchema),
   /** Open pull requests in the repo. More than `prs.length` when GitHub has more than one page. */
   total: z.number().int().min(0),
+  /** The workspace repo name (`.` or a child folder) whose origin is this repo. Null when the workspace has no such checkout. */
+  checkout: RepoNameSchema.nullable(),
 });
 export type GithubPrsResult = z.infer<typeof GithubPrsResultSchema>;
 
@@ -446,6 +450,19 @@ export const COMMANDS = {
       })
       .strict(),
     output: None,
+  },
+  "flow:github.reviewReady": {
+    input: z
+      .object({
+        repo: RepoFullNameSchema,
+        number: z.number().int().min(1).max(999_999_999),
+      })
+      .strict(),
+    output: z.object({
+      ready: z.boolean(),
+      /** The `## Verdict` word when the file is saved. Null when it is missing or has no Yes or No. */
+      verdict: z.enum(["yes", "no"]).nullable(),
+    }),
   },
   "flow:github.openTokenPage": {
     input: z.object({ kind: GithubTokenKindSchema }).strict(),

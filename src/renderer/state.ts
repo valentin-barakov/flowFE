@@ -102,6 +102,23 @@ export function isBusyState(state: ChatStateName): boolean {
   return state === "streaming" || state === "stopping" || state === "awaitingAnswer";
 }
 
+export type ReviewPhase = "running" | "asking";
+
+/**
+ * Whether a repo's chat is running exactly `prompt` right now. A Review card uses this for its spinner,
+ * so the card and the sidebar read the same slice. `stopping` still counts as running.
+ */
+export function reviewPhase(
+  slice: ChatSlice | undefined,
+  prompt: string,
+): ReviewPhase | null {
+  if (slice === undefined || slice.lastUserText !== prompt) return null;
+  if (slice.chatState === "awaitingAnswer") return "asking";
+  if (slice.chatState === "streaming" || slice.chatState === "stopping")
+    return "running";
+  return null;
+}
+
 export type PaneKey = "jiraOpen" | "githubPrsOpen" | "githubProjectsOpen";
 
 const NO_PANE = { jiraOpen: false, githubPrsOpen: false, githubProjectsOpen: false } as const;

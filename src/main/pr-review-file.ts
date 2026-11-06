@@ -50,10 +50,47 @@ export function localRepoPath(fullName: string, repos: readonly { path: string }
   return null;
 }
 
+/** The workspace repo name (`.` or a child folder) whose origin is `fullName`, or null. */
+export function localRepoName(
+  fullName: string,
+  repos: readonly { name: string; path: string }[],
+): string | null {
+  for (const repo of repos) {
+    if (originFullName(repo.path) === fullName) return repo.name;
+  }
+  return null;
+}
+
 /**
  * Absolute path of `pr-reviews/<number>.md` when that file is a regular file
  * inside the checkout. A symlink that leaves the checkout is refused.
  */
+/**
+ * `yes` or `no` from a `## Verdict` section in the first lines of a review file.
+ * The next non-empty line must be exactly `Yes` or `No`. Anything else is null.
+ */
+export function readReviewVerdict(file: string): "yes" | "no" | null {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = text.slice(0, 4_000).split(/\r?\n/).slice(0, 40);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]?.trim() !== "## Verdict") continue;
+    for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+      const word = lines[j]?.trim() ?? "";
+      if (word === "") continue;
+      if (word === "Yes") return "yes";
+      if (word === "No") return "no";
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
 export function existingReviewFile(repoPath: string, number: number): string | null {
   if (!Number.isInteger(number) || number < 1) return null;
   const file = path.join(repoPath, PR_REVIEW_DIR, `${number}.md`);

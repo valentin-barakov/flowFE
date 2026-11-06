@@ -6,7 +6,11 @@ import path from "node:path";
 import { QuestionRejected, QUESTION_CANCELLED } from "../shared/questions.js";
 import { createAgentService } from "./agent-service.js";
 import { createGithubService } from "./github-service.js";
-import { existingReviewFile, localRepoPath } from "./pr-review-file.js";
+import {
+  existingReviewFile,
+  localRepoName,
+  localRepoPath,
+} from "./pr-review-file.js";
 import { publish, registerIpc, type IpcHost } from "./ipc.js";
 import { createJiraService } from "./jira-service.js";
 import { createRulesSkills } from "./rules-skills-service.js";
@@ -53,6 +57,11 @@ function start(): void {
   applyDockIcon();
   const store = createSettingsStore({ userDataDir: app.getPath("userData"), secrets: safeStorage });
   const files = createRulesSkills();
+  const workspaceRepos = () => {
+    const current = store.view();
+    if (current.folder === null || current.folderMissing) return [];
+    return store.listRepos(current.folder);
+  };
   const jira = createJiraService({
     userDataDir: app.getPath("userData"),
     secrets: safeStorage,
@@ -67,12 +76,12 @@ function start(): void {
     openExternal: (url) => shell.openExternal(url),
     // reviewFile only returns <checkout>/pr-reviews/<number>.md. openPath receives that path.
     reviewFile: (repo, number) => {
-      const current = store.view();
-      if (current.folder === null || current.folderMissing) return null;
-      const checkout = localRepoPath(repo, store.listRepos(current.folder));
+      const checkout = localRepoPath(repo, workspaceRepos());
       if (checkout === null) return null;
       return existingReviewFile(checkout, number);
     },
+    // Only the repo name (`.` or a child folder) leaves main. The window never gets a path.
+    localRepoName: (repo) => localRepoName(repo, workspaceRepos()),
     openPath: async (file) => {
       const error = await shell.openPath(file);
       if (error !== "") throw new Error(error);

@@ -16,8 +16,10 @@ import {
 import {
   existingReviewFile,
   githubFullNameFromRemote,
+  localRepoName,
   localRepoPath,
   originFullName,
+  readReviewVerdict,
 } from "../src/main/pr-review-file.ts";
 import {
   ciLabel,
@@ -32,6 +34,7 @@ import {
   prsReady,
   relativeTime,
   reviewLabel,
+  reviewPrompt,
   reviewState,
   shortRepoName,
 } from "../src/shared/github.ts";
@@ -41,6 +44,7 @@ import {
   emptySlice,
   initialState,
   reducer,
+  reviewPhase,
   screenOf,
   sidebarRows,
   type AppState,
@@ -86,6 +90,17 @@ test("an item URL is built from a clean repo and a positive number", () => {
   assert.equal(itemUrl("octo/hello", "pr", 0), null);
   assert.equal(itemUrl("octo/hello", "pr", 1.5), null);
   assert.equal(itemUrl("octo/hello", "pr", 1_000_000_000), null);
+});
+
+test("the Review button sends review pr <url>, only for a clean repo and number", () => {
+  assert.equal(
+    reviewPrompt("octo/hello", 12),
+    "review pr https://github.com/octo/hello/pull/12",
+  );
+  assert.equal(reviewPrompt("octo/..", 12), null);
+  assert.equal(reviewPrompt("evil.example/x?y", 12), null);
+  assert.equal(reviewPrompt("octo/hello", 0), null);
+  assert.equal(reviewPrompt("octo/hello", 1.5), null);
 });
 
 test("the Link header gives the next page", () => {
@@ -460,6 +475,7 @@ test("pull requests: one GraphQL call for a picked repo, parsed, and refused oth
       approvedByYou: true,
       ci: "failing",
       hasReview: false,
+      verdict: null,
     },
     {
       number: 6,
@@ -473,6 +489,7 @@ test("pull requests: one GraphQL call for a picked repo, parsed, and refused oth
       approvedByYou: false,
       ci: null,
       hasReview: false,
+      verdict: null,
     },
   ]);
 
@@ -491,6 +508,8 @@ test("pull requests: one GraphQL call for a picked repo, parsed, and refused oth
 
 test("a saved pr-reviews/<number>.md is marked on the card and opened", async () => {
   const notes = path.join(tempDir(), "checkout", "pr-reviews", "5.md");
+  mkdirSync(path.dirname(notes), { recursive: true });
+  writeFileSync(notes, "# PR review — Add cache (#5)\n\n## Verdict\n\nNo\n");
   const opened: string[] = [];
   const { service } = await repoService(() => ({ status: 200, body: PR_BODY }));
   service.selectRepos({ repos: ["octo/hello"] });
@@ -509,13 +528,68 @@ test("a saved pr-reviews/<number>.md is marked on the card and opened", async ()
 
   const result = await withNotes.prs({ repo: "octo/hello" });
   assert.equal(result.prs[0]?.hasReview, true);
+  assert.equal(result.prs[0]?.verdict, "no");
   assert.equal(result.prs[1]?.hasReview, false);
+  assert.equal(result.prs[1]?.verdict, null);
 
   await withNotes.openReview({ repo: "octo/hello", number: 5 });
   assert.deepEqual(opened, [notes]);
   await assert.rejects(() => withNotes.openReview({ repo: "octo/hello", number: 6 }), isError("not_found", false));
   await assert.rejects(() => withNotes.openReview({ repo: "octo/other", number: 5 }), isError("invalid_input"));
   await assert.rejects(() => service.openReview({ repo: "octo/hello", number: 5 }), isError("not_found", false));
+});
+
+test("a card knows its workspace checkout, and whether the review file is saved yet", async () => {
+  const notes = path.join(tempDir(), "checkout", "pr-reviews", "5.md");
+  let saved = false;
+  const service = createGithubService({
+    userDataDir: tempDir(),
+    secrets: box,
+    fetch: fakeFetch(
+      (call) => viewerOr(call, () => ({ status: 200, body: PR_BODY })),
+      [],
+    ),
+    openExternal: async () => {},
+    localRepoName: (repo) => (repo === "octo/hello" ? "hello" : null),
+    reviewFile: (_repo, number) => (number === 5 && saved ? notes : null),
+  });
+  await service.saveRepoToken({ token: REPO_TOKEN });
+  service.selectRepos({ repos: ["octo/hello", "octo/lonely"] });
+
+  assert.equal((await service.prs({ repo: "octo/hello" })).checkout, "hello");
+  assert.equal((await service.prs({ repo: "octo/lonely" })).checkout, null);
+
+  assert.deepEqual(service.reviewReady({ repo: "octo/hello", number: 5 }), {
+    ready: false,
+    verdict: null,
+  });
+  saved = true;
+  mkdirSync(path.dirname(notes), { recursive: true });
+  writeFileSync(notes, "# PR review\n\n## Verdict\n\nYes\n");
+  assert.deepEqual(service.reviewReady({ repo: "octo/hello", number: 5 }), {
+    ready: true,
+    verdict: "yes",
+  });
+  assert.deepEqual(service.reviewReady({ repo: "octo/hello", number: 6 }), {
+    ready: false,
+    verdict: null,
+  });
+  assert.throws(
+    () => service.reviewReady({ repo: "octo/other", number: 5 }),
+    isError("invalid_input"),
+  );
+  assert.throws(
+    () => service.reviewReady({ repo: "octo/..", number: 5 }),
+    isError("invalid_input"),
+  );
+
+  const bare = await repoService(() => ({ status: 200, body: PR_BODY }));
+  bare.service.selectRepos({ repos: ["octo/hello"] });
+  assert.equal((await bare.service.prs({ repo: "octo/hello" })).checkout, null);
+  assert.deepEqual(
+    bare.service.reviewReady({ repo: "octo/hello", number: 5 }),
+    { ready: false, verdict: null },
+  );
 });
 
 test("the review file is pr-reviews/<number>.md in the checkout whose origin matches", () => {
@@ -532,14 +606,31 @@ test("the review file is pr-reviews/<number>.md in the checkout whose origin mat
   assert.equal(originFullName(match), "octo/hello");
   assert.equal(localRepoPath("octo/hello", [{ path: other }, { path: match }]), match);
   assert.equal(localRepoPath("octo/missing", [{ path: match }]), null);
+  assert.equal(
+    localRepoName("octo/hello", [
+      { name: "other", path: other },
+      { name: "hello", path: match },
+    ]),
+    "hello",
+  );
+  assert.equal(
+    localRepoName("octo/missing", [{ name: "hello", path: match }]),
+    null,
+  );
+  assert.equal(localRepoName("octo/hello", []), null);
 
   const notes = path.join(match, "pr-reviews");
   mkdirSync(notes);
   const file = path.join(notes, "5.md");
-  writeFileSync(file, "# review\n");
+  writeFileSync(file, "# review\n\n## Verdict\n\nYes\n");
   const found = existingReviewFile(match, 5);
   assert.equal(found !== null && found.endsWith(`${path.sep}pr-reviews${path.sep}5.md`), true);
+  assert.equal(found !== null && readReviewVerdict(found), "yes");
   assert.equal(existingReviewFile(match, 6), null);
+  writeFileSync(file, "# review\n\n## Verdict\n\nMaybe\n");
+  assert.equal(readReviewVerdict(file), null);
+  writeFileSync(file, `${"note\n".repeat(40)}## Verdict\n\nNo\n`);
+  assert.equal(readReviewVerdict(file), null);
 
   const outside = tempDir();
   const escaped = path.join(outside, "5.md");
@@ -881,6 +972,25 @@ test("the GitHub commands refuse input the window should never send", () => {
   assert.equal(openReview.safeParse({ repo: "octo/..", number: 69 }).success, false);
   assert.equal(openReview.safeParse({ repo: "octo/hello", number: 69, file: "/tmp/x.md" }).success, false);
 
+  const reviewReady = COMMANDS["flow:github.reviewReady"].input;
+  assert.equal(
+    reviewReady.safeParse({ repo: "octo/hello", number: 69 }).success,
+    true,
+  );
+  assert.equal(
+    reviewReady.safeParse({ repo: "octo/hello", number: 0 }).success,
+    false,
+  );
+  assert.equal(
+    reviewReady.safeParse({ repo: "octo/..", number: 69 }).success,
+    false,
+  );
+  assert.equal(
+    reviewReady.safeParse({ repo: "octo/hello", number: 69, file: "/tmp/x.md" })
+      .success,
+    false,
+  );
+
   const open = COMMANDS["flow:github.open"].input;
   assert.equal(open.safeParse({ repo: "octo/hello", kind: "pr", number: 3 }).success, true);
   for (const bad of [
@@ -1049,4 +1159,69 @@ test("while any pane is open no repo row is selected, and a reply under it is un
   });
   assert.equal(done.chats.api?.unseen, true);
   assert.equal(reducer(done, { type: "close-github-prs" }).chats.api?.unseen, false);
+});
+
+test("a card is reviewing while its checkout runs that exact review message", () => {
+  const prompt = "review pr https://github.com/octo/hello/pull/5";
+  assert.equal(reviewPhase(undefined, prompt), null);
+  assert.equal(
+    reviewPhase(chat({ chatState: "streaming", lastUserText: prompt }), prompt),
+    "running",
+  );
+  assert.equal(
+    reviewPhase(chat({ chatState: "stopping", lastUserText: prompt }), prompt),
+    "running",
+  );
+  assert.equal(
+    reviewPhase(
+      chat({ chatState: "awaitingAnswer", lastUserText: prompt }),
+      prompt,
+    ),
+    "asking",
+  );
+  assert.equal(
+    reviewPhase(chat({ chatState: "ready", lastUserText: prompt }), prompt),
+    null,
+  );
+  assert.equal(
+    reviewPhase(
+      chat({ chatState: "needsSetup", lastUserText: prompt }),
+      prompt,
+    ),
+    null,
+  );
+  assert.equal(
+    reviewPhase(
+      chat({ chatState: "streaming", lastUserText: "fix the build" }),
+      prompt,
+    ),
+    null,
+  );
+  assert.equal(
+    reviewPhase(
+      chat({
+        chatState: "streaming",
+        lastUserText: "review pr https://github.com/octo/hello/pull/6",
+      }),
+      prompt,
+    ),
+    null,
+  );
+
+  const sent = reducer(app(), { type: "sending", repo: "api", text: prompt });
+  assert.equal(reviewPhase(sent.chats.api, prompt), "running");
+  assert.equal(reviewPhase(sent.chats.web, prompt), null);
+  const done = reducer(
+    reducer(sent, {
+      type: "event",
+      event: {
+        type: "chat.state",
+        repo: "api",
+        runId: "session",
+        state: "ready",
+      },
+    }),
+    { type: "close-github-prs" },
+  );
+  assert.equal(reviewPhase(done.chats.api, prompt), null);
 });

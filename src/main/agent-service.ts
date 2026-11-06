@@ -5,6 +5,8 @@ import {
   Cursor,
   CursorAgentError,
   type AgentOptions,
+  type ModelListItem,
+  type ModelSelection,
   type Run,
   type SDKCustomTool,
   type SDKJsonValue,
@@ -90,18 +92,28 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
     cancelRequested = false;
   }
 
+  let catalogKey = "";
+  let catalogModels: ModelListItem[] = [];
+
+  async function loadCatalog(apiKey: string): Promise<readonly ModelListItem[]> {
+    if (catalogKey === apiKey && catalogModels.length > 0) return catalogModels;
+    const models = await Cursor.models.list({ apiKey });
+    catalogKey = apiKey;
+    catalogModels = models;
+    return models;
+  }
+
+  async function selectionFor(apiKey: string, modelId: string): Promise<ModelSelection> {
+    try {
+      return modelSelection(modelId, await loadCatalog(apiKey));
+    } catch (error) {
+      throw translate(error, apiKey);
+    }
+  }
+
   async function listModels(apiKey: string): Promise<{ id: string; label: string }[]> {
     try {
-      const models = await Cursor.models.list({ apiKey });
-      const seen = new Set<string>();
-      const listed: { id: string; label: string }[] = [];
-      for (const model of models) {
-        if (seen.has(model.id)) continue;
-        seen.add(model.id);
-        listed.push({ id: model.id, label: model.displayName.trim() === "" ? model.id : model.displayName });
-      }
-      listed.sort((a, b) => a.label.localeCompare(b.label));
-      return listed;
+      return listedModels(await loadCatalog(apiKey));
     } catch (error) {
       throw translate(error, apiKey);
     }
@@ -115,7 +127,7 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
     if (holder) await disposeHolder();
     if (cancelRequested || seen !== epoch) throw new Cancelled();
 
-    const options = agentOptions(input, hooks.ask);
+    const options = await agentOptions(input, hooks.ask, selectionFor);
     if (!input.fresh && input.agentId !== null) {
       try {
         const agent = await resumeWithTimeout(input.agentId, options, RESUME_TIMEOUT_MS);
@@ -156,7 +168,7 @@ export function createAgentService(hooks: { ask: AskUser }): AgentService {
     let run: Run;
     try {
       run = await current.agent.send(input.prompt, {
-        model: { id: input.modelId },
+        model: await selectionFor(input.apiKey, input.modelId),
         mode: input.mode,
         local: { customTools: questionTools(hooks.ask) },
         // The run stream drops nested task updates. onDelta is how the card learns what the subagent is doing.
@@ -286,11 +298,55 @@ function toolError(text: string): { content: [{ type: "text"; text: string }]; i
   return { content: [{ type: "text", text }], isError: true };
 }
 
-function agentOptions(input: EnsureInput, ask: AskUser): AgentOptions {
-  const settingSources: Array<"project"> = ["project"];
+/** A catalog id stays `{ id }`. `<id>-<value>` is that model's variant, sent as the catalog id plus its parameters. */
+export function modelSelection(modelId: string, models: readonly ModelListItem[]): ModelSelection {
+  if (models.some((model) => model.id === modelId)) return { id: modelId };
+  for (const model of models) {
+    const variant = model.variants?.find((item) => variantChoiceId(model.id, item.params) === modelId);
+    if (variant) return { id: model.id, params: variant.params };
+    if (model.aliases?.includes(modelId)) return { id: model.id };
+  }
+  return { id: modelId };
+}
+
+/** Catalog ids, plus one row per single-parameter variant (`<id>-<value>`), plus any other alias. */
+export function listedModels(models: readonly ModelListItem[]): { id: string; label: string }[] {
+  const seen = new Set<string>();
+  const listed: { id: string; label: string }[] = [];
+  const add = (id: string, label: string) => {
+    if (id === "" || seen.has(id)) return;
+    seen.add(id);
+    listed.push({ id, label: label.trim() === "" ? id : label.trim() });
+  };
+  for (const model of models) {
+    const name = model.displayName.trim() === "" ? model.id : model.displayName.trim();
+    add(model.id, name);
+    for (const variant of model.variants ?? []) {
+      if (variant.isDefault) continue;
+      const choiceId = variantChoiceId(model.id, variant.params);
+      if (choiceId === null) continue;
+      const variantName = variant.displayName.trim();
+      add(choiceId, variantName === "" || name.includes(variantName) ? name : `${name} (${variantName})`);
+    }
+    for (const alias of model.aliases ?? []) add(alias, alias);
+  }
+  listed.sort((a, b) => a.label.localeCompare(b.label));
+  return listed;
+}
+
+function variantChoiceId(modelId: string, params: readonly { value: string }[]): string | null {
+  if (params.length !== 1) return null;
+  const value = params[0]?.value ?? "";
+  if (!/^[A-Za-z0-9._-]+$/.test(value)) return null;
+  const choice = `${modelId}-${value}`;
+  return choice === modelId ? null : choice;
+}
+
+async function agentOptions(input: EnsureInput, ask: AskUser, selectionFor: (apiKey: string, modelId: string) => Promise<ModelSelection>): Promise<AgentOptions> {
+  const settingSources: Array<"project" | "user"> = ["project", "user"];
   return {
     apiKey: input.apiKey,
-    model: { id: input.modelId },
+    model: await selectionFor(input.apiKey, input.modelId),
     mode: input.mode,
     local: { cwd: input.cwd, settingSources, customTools: questionTools(ask) },
   };
