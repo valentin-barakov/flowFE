@@ -82,6 +82,37 @@ export function isBusyState(state: ChatStateName): boolean {
   return state === "streaming" || state === "stopping" || state === "awaitingAnswer";
 }
 
+export type SidebarRow = {
+  name: string;
+  status: "idle" | "running" | "waiting" | "error";
+  unseen: boolean;
+  active: boolean;
+};
+
+export function sidebarRows(state: AppState): SidebarRow[] {
+  const rows: SidebarRow[] = [];
+  for (const row of state.repos) {
+    const slice = state.chats[row.name];
+    const active = state.view.kind === "repo" && state.view.repo === row.name;
+    if (!active && !row.hasHistory && !isBusyState(row.state) && slice?.unseen !== true && slice?.banner == null) continue;
+    let status: SidebarRow["status"] = "idle";
+    if (row.state === "awaitingAnswer") status = "waiting";
+    else if (row.state === "streaming" || row.state === "stopping") status = "running";
+    else if (slice?.banner != null) status = "error";
+    rows.push({
+      name: row.name,
+      status,
+      unseen: slice?.unseen === true,
+      active,
+    });
+  }
+  return rows;
+}
+
+export function shouldLeaveAfterReset(state: AppState, repo: string): boolean {
+  return state.repos.length > 1 && state.view.kind === "repo" && state.view.repo === repo;
+}
+
 export function canRetry(slice: ChatSlice): boolean {
   return slice.banner?.retryable === true && slice.lastUserText !== null && (slice.chatState === "ready" || slice.chatState === "needsSetup");
 }
@@ -328,6 +359,7 @@ export function reducer(state: AppState, action: Action): AppState {
         liveAgentId: null,
         lastUserText: null,
         pendingQuestionId: null,
+        unseen: false,
       };
       return placeSlice(state, action.repo, slice, { hasHistory: false });
     }

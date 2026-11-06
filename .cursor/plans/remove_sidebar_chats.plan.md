@@ -74,25 +74,22 @@ sequenceDiagram
 ## Current State Analysis
 
 **✅ Exists**
+- `sidebarRows` and `shouldLeaveAfterReset` are exported from `state.ts` (Step 1). `reset-chat` sets `unseen: false` (Step 1). `scripts/sidebar-check.ts` and `npm run check:sidebar` cover which rows remain after a clear (Step 1). `App` uses those exports: `resetChat(repo)` leaves for home only when `shouldLeaveAfterReset` is true, and `RepoSidebar` confirms Remove (Step 2).
 - `flow:chat.reset` takes `{ repo }` and returns `{}`. `chat-session.ts` `reset` refuses a busy repo with `conflict` and a missing folder with `not_ready`, then writes an empty chat. `session-manager.ts` routes the command to that repo. No preload change is required.
 - The header Reset chat dialog in `Chat.tsx` confirms, then calls `onReset`. The button is disabled while that chat is busy or a command is in flight.
-- `App.tsx` `resetChat` always uses `currentRepo()`, then dispatches `reset-chat`. It does not open home.
+- `App.tsx` `resetChat(repo)` dispatches `reset-chat`, then `open-home` when `shouldLeaveAfterReset` is true (Step 2).
 - `reducer` `reset-chat` empties the slice and sets `hasHistory: false` through `placeSlice`. `open-home` sets `view` to home and `instructionsOpen` to false.
-- `App.tsx` `sidebarRows` lists a repo when it is active, has history, is busy, has `unseen`, or has a banner. Status is `waiting` for `awaitingAnswer`, `running` for `streaming` or `stopping`, `error` when the slice has a banner, otherwise `idle`.
+- `sidebarRows` in `state.ts` lists a repo when it is active, has history, is busy, has `unseen`, or has a banner. Status is `waiting` for `awaitingAnswer`, `running` for `streaming` or `stopping`, `error` when the slice has a banner, otherwise `idle`. `App` no longer keeps a local copy (Step 2).
 - The left menu renders only when `state.repos.length > 1` (`App.tsx`). One repo shows `Chat` or `Instructions` with no sidebar. `currentRepo()` is null when `view.kind` is not `"repo"`.
 - Dialog and danger styles exist: `.dialog-back`, `.dialog`, `.actions`, `.btn.danger`.
 - Check scripts run with `node:test`. Scripts that import app files with `.js` specifiers use `scripts/repos-check-resolve.mjs`. `src/renderer/state.ts` is one of those files.
 
 **❌ Missing Components**
-- `sidebarRows` and `shouldLeaveAfterReset` are not exported from `state.ts`. The list logic lives only inside `App`.
-- `reset-chat` keeps `unseen` from the previous slice, so a cleared background chat can remain in the list.
-- `RepoSidebar` has no Remove button and no confirm dialog. Its row is a single button, so a second button cannot be nested inside it.
-- `resetChat` cannot target a repo that is not the open one, and it never dispatches `open-home`.
-- No check covers which rows remain after a clear.
+- None. Documentation Update (Step 3) describes Remove, the leave rule, and `check:sidebar`.
 
 ## Implementation Steps
 
-### Step 1: List rule, leave rule, and clear the unseen flag
+### ✅ Step 1: List rule, leave rule, and clear the unseen flag
 - **Files:** `src/renderer/state.ts`, `scripts/sidebar-check.ts`, `package.json`
 - **Change:** Move the left-menu list into `sidebarRows`, add `shouldLeaveAfterReset`, and set `unseen: false` on `reset-chat` so a cleared chat drops once it is not the open one. The check script locks those three behaviors. `App` still has its own copy of the list until Step 2.
 
@@ -282,7 +279,7 @@ test("a missing folder keeps the row because the folder banner comes back", () =
 
 The `bad` repo is added in the first test through `withBanner` because its slice exists only when the repo is also in `repos`. Run `npm run check:sidebar`. `npm run typecheck` still passes with `App`'s local list in place.
 
-### Step 2: Remove button, confirm, and leave the open chat
+### ✅ Step 2: Remove button, confirm, and leave the open chat
 - **Files:** `src/renderer/RepoSidebar.tsx`, `src/renderer/App.tsx`, `src/renderer/styles.css`
 - **Change:** Each row is an open button plus a Remove button. Confirm, then `resetChat(repo)`. After a successful clear, leave only when `shouldLeaveAfterReset` is true. Delete `App`'s local `sidebarRows`; the export from Step 1 replaces it.
 
@@ -442,7 +439,7 @@ After
 
 `.repo-row, .mention-hit` still sets `width: 100%`. The later `.repo-row` rule overrides that for the sidebar only, so mention hits stay full width. `.unseen` keeps `margin-left: auto` inside the open button.
 
-### Step 3: Update Documentation (always the last step)
+### ✅ Step 3: Update Documentation (always the last step)
 - **Files:** `docs/architecture.md`, `docs/session-and-questions.md`, `docs/README.md`, `README.md`
 - **Change:** Describe Remove and the leave rule. The replacement text is in the Documentation Update section. Apply that section once. Do not apply it again from here.
 
@@ -466,7 +463,7 @@ Apply the fenced replacements in the Documentation Update section below. They ar
 
 ## Testing Checklist
 - [ ] `npm run typecheck` passes
-- [ ] `npm run check:sidebar` passes
+- [x] `npm run check:sidebar` passes
 - [ ] With two repos that have history, Remove on the one that is not open clears it, the row disappears, and the open chat stays
 - [ ] Remove on the open chat returns to New chat, and that row is gone
 - [ ] Cancel on the dialog leaves the chat and the list unchanged
@@ -476,16 +473,16 @@ Apply the fenced replacements in the Documentation Update section below. They ar
 - [ ] A failed reset shows the banner and keeps the row
 
 ## Files to Modify
-- [ ] `src/renderer/state.ts`
-- [ ] `scripts/sidebar-check.ts`
-- [ ] `package.json`
-- [ ] `src/renderer/RepoSidebar.tsx`
-- [ ] `src/renderer/App.tsx`
-- [ ] `src/renderer/styles.css`
-- [ ] `docs/architecture.md`
-- [ ] `docs/session-and-questions.md`
-- [ ] `docs/README.md`
-- [ ] `README.md`
+- [x] `src/renderer/state.ts`
+- [x] `scripts/sidebar-check.ts`
+- [x] `package.json`
+- [x] `src/renderer/RepoSidebar.tsx`
+- [x] `src/renderer/App.tsx`
+- [x] `src/renderer/styles.css`
+- [x] `docs/architecture.md`
+- [x] `docs/session-and-questions.md`
+- [x] `docs/README.md`
+- [x] `README.md`
 
 ## Implementation Order
 1. Step 1
@@ -494,16 +491,16 @@ Apply the fenced replacements in the Documentation Update section below. They ar
 
 ## Documentation Update
 
-### Step 3: Update Documentation (always the last step)
+### ✅ Step 3: Update Documentation (always the last step)
 
 **Affected documents**
 
 | Document | What changes | Status |
 |----------|--------------|--------|
-| `docs/architecture.md` | Add the left menu to the renderer screens. Add `sidebar-check.ts` to the folder layout. | todo |
-| `docs/session-and-questions.md` | Reset chat and the sidebar sentence mention Remove and returning to New chat. | todo |
-| `docs/README.md` | Status line lists `check:sidebar`. | todo |
-| `README.md` | One sentence on Remove, and `check:sidebar` in the checks list. | todo |
+| `docs/architecture.md` | Add the left menu to the renderer screens. Add `sidebar-check.ts` to the folder layout. | done |
+| `docs/session-and-questions.md` | Reset chat and the sidebar sentence mention Remove and returning to New chat. | done |
+| `docs/README.md` | Status line lists `check:sidebar`. | done |
+| `README.md` | One sentence on Remove, and `check:sidebar` in the checks list. | done |
 | `docs/ipc-contract.md` | No change, because Remove calls the existing `flow:chat.reset`. Input, output, and errors stay the same. | n/a |
 | `docs/decisions.md` | No change, because D-5 already says Reset chat drops that repo's `agentId` and messages, and a one-repo workspace has no home screen. This plan does not add a second chat per repo and does not send the one-repo window home. | n/a |
 
@@ -523,8 +520,8 @@ A question card, the banner, a mode control, a model picker, the theme switch, R
 ```markdown
 scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts,
               mention-check.ts, repos-check.ts, sidebar-check.ts, plan-check.ts,
-              segments-check.ts, tool-summary-check.ts, sdk-binaries-check.ts,
-              packaged-sdk-check.mjs, after-pack.cjs
+              segments-check.ts, tool-summary-check.ts, packaged-sdk-check.mjs,
+              after-pack.cjs
 ```
 
 `docs/session-and-questions.md` (replace the Reset chat paragraph)
@@ -557,12 +554,11 @@ npm run check:sidebar
 npm run check:plan
 npm run check:segments
 npm run check:tools
-npm run check:sdk
 ```
 
 `README.md` (section "Checks", replace the paragraph that starts with `` `check:mentions` ``)
 ```markdown
-`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:sdk` covers the startup paths for `rg` and the tree-sitter natives. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.
+`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.
 ```
 
 **Open questions**

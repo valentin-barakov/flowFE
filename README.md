@@ -2,6 +2,8 @@
 
 A local Mac app that chats with Cursor agents in a workspace folder you pick. Each git repo in that folder has its own chat, and agents in different repos can run at the same time. You can edit the open repo's rules and skills in the app. The agent can ask you questions as a form.
 
+When the workspace has several repos, the left menu lists the chats that are running or already have history. Remove clears that chat and takes it off the list. If that chat is the one on screen, the window returns to New chat.
+
 The chat has an Agent or Plan control. Agent is the default. In Plan mode, a plan the agent writes is shown as a document in the thread.
 
 The agent runs on this Mac through `@cursor/sdk` (local runtime). The model is still served by Cursor, so the app needs a Cursor API key. The key is stored with Electron `safeStorage` and is never shown again.
@@ -34,12 +36,12 @@ npm run typecheck
 npm run check:questions
 npm run check:mentions
 npm run check:repos
+npm run check:sidebar
 npm run check:plan
 npm run check:segments
 npm run check:tools
-npm run check:sdk
 ```
 
 Question-argument parsing is covered by `npm run check:questions`. File-path checks live in `scripts/phase2-files-check.mjs`.
 
-`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:sdk` covers the startup paths for `rg` and the tree-sitter natives. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.
+`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery, two sessions at once, and the text offset saved on each tool line and question. `check:sidebar` covers which left-menu rows remain after a chat is cleared, including the return to New chat when several repos are open. `check:plan` covers markdown rendering, diagram helpers, and the `createPlan` name match. `check:segments` covers how a run's text, tool calls, and cards are put in order. `check:tools` covers the one-line tool summary. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.

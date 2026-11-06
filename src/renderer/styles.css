@@ -563,6 +563,10 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
   overflow: auto;
 }
 .repo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.repo-item { display: flex; align-items: center; gap: 4px; }
+.repo-row { flex: 1; min-width: 0; width: auto; }
+.repo-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-remove { flex: none; padding: 4px 8px; }
 .repo-row, .mention-hit {
   width: 100%;
   text-align: left;

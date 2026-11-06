@@ -4,9 +4,9 @@ import { parseMention } from "../shared/mention.js";
 import { Chat } from "./Chat.js";
 import { Instructions } from "./Instructions.js";
 import { NewChat } from "./NewChat.js";
-import { RepoSidebar, type SidebarRow } from "./RepoSidebar.js";
+import { RepoSidebar } from "./RepoSidebar.js";
 import { Setup } from "./Setup.js";
-import { anyBusy, bannerFor, busyRepoNames, canRetry, emptySlice, initialState, isBusyState, reducer, screenOf, type Banner } from "./state.js";
+import { anyBusy, bannerFor, busyRepoNames, canRetry, emptySlice, initialState, isBusyState, reducer, screenOf, shouldLeaveAfterReset, sidebarRows, type Banner } from "./state.js";
 
 type HeldEvents = { hold: boolean; events: FlowEvent[] };
 
@@ -417,9 +417,7 @@ export function App() {
     return null;
   }
 
-  async function resetChat(): Promise<void> {
-    const repo = currentRepo();
-    if (repo === null) return;
+  async function resetChat(repo: string): Promise<void> {
     const box = holds.current.get(repo);
     if (box !== undefined) {
       box.hold = false;
@@ -433,7 +431,9 @@ export function App() {
       dispatch({ type: "banner", repo, banner: bannerFrom(result.error) });
       return;
     }
+    const leave = shouldLeaveAfterReset(stateRef.current, repo);
     dispatch({ type: "reset-chat", repo });
+    if (leave) dispatch({ type: "open-home" });
   }
 
   async function stop(): Promise<void> {
@@ -443,26 +443,6 @@ export function App() {
     const result = await window.flow.invoke("flow:chat.stop", { repo });
     setPending(false);
     if (!result.ok) dispatch({ type: "banner", repo, banner: bannerFrom(result.error) });
-  }
-
-  function sidebarRows(): SidebarRow[] {
-    const rows: SidebarRow[] = [];
-    for (const row of state.repos) {
-      const slice = state.chats[row.name];
-      const active = state.view.kind === "repo" && state.view.repo === row.name;
-      if (!active && !row.hasHistory && !isBusyState(row.state) && slice?.unseen !== true && slice?.banner == null) continue;
-      let status: SidebarRow["status"] = "idle";
-      if (row.state === "awaitingAnswer") status = "waiting";
-      else if (row.state === "streaming" || row.state === "stopping") status = "running";
-      else if (slice?.banner != null) status = "error";
-      rows.push({
-        name: row.name,
-        status,
-        unseen: slice?.unseen === true,
-        active,
-      });
-    }
-    return rows;
   }
 
   function retryFor(repo: string): void {
@@ -499,7 +479,7 @@ export function App() {
         onTheme={(theme) => void saveSettings({ theme })}
         onMode={(mode) => void saveSettings({ mode })}
         onModel={(model) => saveSettings({ model })}
-        onReset={() => void resetChat()}
+        onReset={() => void resetChat(repoName)}
         onSetup={() => dispatch({ type: "edit-setup" })}
         onInstructions={() => dispatch({ type: "open-instructions" })}
         onDismiss={() => dispatch({ type: "dismiss-banner", repo: repoName })}
@@ -574,7 +554,13 @@ export function App() {
         </>
       ) : state.repos.length > 1 ? (
         <div className="shell">
-          <RepoSidebar rows={sidebarRows()} onOpen={(name) => void openChat(name)} onNew={() => dispatch({ type: "open-home" })} />
+          <RepoSidebar
+            rows={sidebarRows(state)}
+            pending={pending}
+            onOpen={(name) => void openChat(name)}
+            onNew={() => dispatch({ type: "open-home" })}
+            onRemove={(name) => void resetChat(name)}
+          />
           {screen === "home" ? home : screen === "instructions" && repo !== null ? instructionsPane(repo) : repo !== null ? chatPane(repo, settings) : null}
         </div>
       ) : screen === "instructions" && repo !== null ? (

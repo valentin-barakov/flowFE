@@ -47,7 +47,6 @@ flowchart TB
 | `ipc.ts` | Command registration, sender check, `input.parse`, result envelope | Call the SDK or touch files directly |
 | `settings-store.ts` | `settings.json`, chat files, the encrypted key (via an injected `safeStorage`) | Return the key to the renderer |
 | `rules-skills-service.ts` | Reading and writing rules, skills, `AGENTS.md` inside the allowlist | Touch any path outside it |
-| `sdk-binaries.ts` | `CURSOR_RIPGREP_PATH` and `CURSOR_TREE_SITTER_VENDOR_DIR`, set once at startup from the platform package | Import the SDK |
 | `agent-service.ts` | `Agent.create`, `Agent.resume`, `send`, stream mapping, cancel, dispose | Know about IPC or the UI |
 | `tool-summary.ts` | The one-line detail for a tool call: a repo-relative path, a command, or a pattern, taken from the call's arguments | Import the SDK or read the result of a call |
 | `session-manager.ts` | The repo map, lazy `AgentService` per repo, global busy checks, shutdown | Call the SDK itself |
@@ -97,7 +96,8 @@ flowchart TB
 No global state library. One reducer in `renderer/state.ts`. After load, the window shows one of three screens:
 
 - **Setup**: key, folder, model, mode, and theme, until all of key, folder, and model exist. Chat can open it again; once setup is complete it has Back to chat.
-- **Chat**: the reducer fed by `chat.history` plus the event stream. `segments.ts` turns the items into blocks: a run's text is cut at the `offset` of each tool call, question, and plan, so the thread reads text, a tool strip or card, text, and so on. A tool strip shows one row per call (name, path or command, status) and is four rows tall, with a scrollbar for more. Text and finished plans render as markdown through `Markdown.tsx` (D-14). A `mermaid` fence is drawn as a diagram by `MermaidBlock.tsx` once its message has finished, and shown as code while it streams (D-15). A question card, the banner, a mode control, a model picker, the theme switch, Reset chat, and a Rules button are also in the screen. Reset chat asks for confirmation, then calls `chat.reset`.
+- **Chat**: the reducer fed by `chat.history` plus the event stream. `segments.ts` turns the items into blocks: a run's text is cut at the `offset` of each tool call, question, and plan, so the thread reads text, a tool strip or card, text, and so on. A tool strip shows one row per call (name, path or command, status) and is four rows tall, with a scrollbar for more. Text and finished plans render as markdown through `Markdown.tsx` (D-14). A `mermaid` fence is drawn as a diagram by `MermaidBlock.tsx` once its message has finished, and shown as code while it streams (D-15). A question card, the banner, a mode control, a model picker, the theme switch, Reset chat, and a Rules button are also in the screen. Reset chat asks for confirmation, then calls `chat.reset`. In a workspace with several repos that also returns to New chat.
+- **Left menu** (`RepoSidebar.tsx`): shown when the workspace has more than one repo. It lists repos that are running, waiting, have history, have an unseen reply, have an error banner, or are the open chat. Remove asks for confirmation, then calls `chat.reset` for that repo. A running or waiting repo cannot be removed. When the removed repo is the one on screen, the window returns to New chat. Header Reset chat uses that same leave. A workspace with one repo has no left menu; Reset chat stays on the empty thread.
 - **Rules and skills** (`Instructions.tsx`): tabs for rules, skills, and `AGENTS.md`. Rules and skills are a list on the left and a form on the right, with load / edit / save, a dirty flag, and the note that a saved change applies to the next message. `AGENTS.md` is one body field. Leaving the screen with unsaved edits asks for confirmation.
 
 `QuestionForm` takes the question as props and calls back with an answer or a skip. It checks the answer with `shared/questions.ts` before that callback. It does not know about the SDK.
@@ -107,7 +107,7 @@ No global state library. One reducer in `renderer/state.ts`. After load, the win
 ```text
 src/
   main/       index.ts, window.ts, ipc.ts, session-manager.ts, chat-session.ts,
-              agent-service.ts, sdk-binaries.ts, tool-summary.ts, prompt.ts,
+              agent-service.ts, tool-summary.ts, prompt.ts,
               rules-skills-service.ts, settings-store.ts
   preload/    index.ts, bridge.ts
   shared/     ipc.ts, questions.ts, mention.ts, plan-markdown.ts (exports isCreatePlan only)
@@ -119,8 +119,8 @@ src/
               global.d.ts, styles.css
 docs/         this folder
 scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts,
-              mention-check.ts, repos-check.ts, plan-check.ts, segments-check.ts,
-              tool-summary-check.ts, sdk-binaries-check.ts, packaged-sdk-check.mjs,
+              mention-check.ts, repos-check.ts, sidebar-check.ts, plan-check.ts,
+              segments-check.ts, tool-summary-check.ts, packaged-sdk-check.mjs,
               after-pack.cjs
 ```
 
@@ -128,7 +128,7 @@ scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts
 
 ## Packaging
 
-An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only, `identity: null`). `npm run dist` writes `release/mac-arm64/Mango.app`. `@cursor/sdk-darwin-*` is listed in `asarUnpack` because `bin/rg`, `bin/cursorsandbox`, and `vendor/**/binding.node` cannot run from inside `app.asar`. The SDK looks for that package by walking up from `process.argv[1]` and from the Electron binary. Under Electron, `argv[1]` is the app directory, so the first walk starts at the parent and never enters `node_modules`. The walk from the Electron binary also skips a copy that sits inside the agent workspace. `src/main/sdk-binaries.ts` therefore sets `CURSOR_RIPGREP_PATH` and `CURSOR_TREE_SITTER_VENDOR_DIR` to the platform package before any agent is created. Those two variables are the SDK's own overrides. `scripts/after-pack.cjs` sets the executable bit on the unpacked `bin` files. `scripts/packaged-sdk-check.mjs` checks the unpacked tree, loads the tree-sitter `.node` files with the packaged binary, runs `rg --version`, and requires the `.app` to stay up for a few seconds (that startup imports `@cursor/sdk`). A full agent turn inside the packaged app is not part of the check, because that needs a key and a folder.
+An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only, `identity: null`). `npm run dist` writes `release/mac-arm64/Mango.app`. `@cursor/sdk-darwin-*` is listed in `asarUnpack` because the SDK locates `bin/rg`, `bin/cursorsandbox`, and `vendor/**/binding.node` by walking up from the main script and spawning those files; they cannot run from inside `app.asar`. `scripts/after-pack.cjs` sets the executable bit on those unpacked `bin` files. `scripts/packaged-sdk-check.mjs` checks the unpacked tree, loads the tree-sitter `.node` files with the packaged binary, runs `rg --version`, and requires the `.app` to stay up for a few seconds (that startup imports `@cursor/sdk`). A full agent turn inside the packaged app is not part of the check, because that needs a key and a folder.
 
 ## Out of scope
 

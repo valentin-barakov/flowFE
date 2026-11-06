@@ -8,7 +8,6 @@ import { createAgentService } from "./agent-service.js";
 import { publish, registerIpc, type IpcHost } from "./ipc.js";
 import { createRulesSkills } from "./rules-skills-service.js";
 import { createSessionManager } from "./session-manager.js";
-import { configureSdkBinaries } from "./sdk-binaries.js";
 import { createSettingsStore } from "./settings-store.js";
 import { createMainWindow } from "./window.js";
 
@@ -79,6 +78,5 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-configureSdkBinaries();
 adoptLegacyData();
 void app.whenReady().then(start);
