@@ -2,7 +2,7 @@
 import { dialog, ipcMain, type BrowserWindow } from "electron";
 import { ZodError } from "zod";
 import { COMMANDS, failure, type CommandChannel, type FlowEvent, type InputOf, type OutputOf, type Result } from "../shared/ipc.js";
-import type { ChatSession } from "./chat-session.js";
+import type { SessionManager } from "./session-manager.js";
 import { SessionError } from "./chat-session.js";
 import type { RulesSkills } from "./rules-skills-service.js";
 import { FilesError } from "./rules-skills-service.js";
@@ -12,7 +12,7 @@ export type IpcHost = {
   senderId: number;
 };
 
-export function registerIpc(host: IpcHost, session: ChatSession, files: RulesSkills): void {
+export function registerIpc(host: IpcHost, manager: SessionManager, files: RulesSkills): void {
   const channels = Object.keys(COMMANDS) as CommandChannel[];
   for (const channel of channels) {
     ipcMain.handle(channel, async (event, input: unknown): Promise<Result<OutputOf<typeof channel>>> => {
@@ -22,7 +22,7 @@ export function registerIpc(host: IpcHost, session: ChatSession, files: RulesSki
       const parsed = COMMANDS[channel].input.safeParse(input);
       if (!parsed.success) return failure("invalid_input", issueMessage(parsed.error), false);
       try {
-        const value = await run(channel, parsed.data, host, session, files);
+        const value = await run(channel, parsed.data, host, manager, files);
         const checked = COMMANDS[channel].output.safeParse(value);
         if (!checked.success) return failure("io_error", "The app sent a bad response", false);
         return { ok: true, value: checked.data };
@@ -45,66 +45,96 @@ async function run<C extends CommandChannel>(
   channel: C,
   input: InputOf<C>,
   host: IpcHost,
-  session: ChatSession,
+  manager: SessionManager,
   files: RulesSkills,
 ): Promise<OutputOf<C>> {
   switch (channel) {
     case "flow:settings.get":
-      return session.view() as OutputOf<C>;
+      return manager.view() as OutputOf<C>;
     case "flow:settings.save":
-      return session.save(saveInput(input as InputOf<"flow:settings.save">)) as Promise<OutputOf<C>>;
+      return manager.save(saveInput(input as InputOf<"flow:settings.save">)) as Promise<OutputOf<C>>;
     case "flow:key.set":
-      await session.setKey((input as InputOf<"flow:key.set">).key);
+      await manager.setKey((input as InputOf<"flow:key.set">).key);
       return {} as OutputOf<C>;
     case "flow:key.clear":
-      await session.clearKey();
+      await manager.clearKey();
       return {} as OutputOf<C>;
     case "flow:folder.pick":
       return pickFolder(host) as Promise<OutputOf<C>>;
     case "flow:models.list":
-      return { models: await session.listModels() } as OutputOf<C>;
-    case "flow:chat.send":
-      return session.send((input as InputOf<"flow:chat.send">).text) as Promise<OutputOf<C>>;
+      return { models: await manager.listModels() } as OutputOf<C>;
+    case "flow:repos.list":
+      return { repos: manager.repos() } as OutputOf<C>;
+    case "flow:chat.send": {
+      const body = input as InputOf<"flow:chat.send">;
+      return manager.send(body.repo, body.text) as Promise<OutputOf<C>>;
+    }
     case "flow:chat.stop":
-      await session.stop();
+      await manager.stop((input as InputOf<"flow:chat.stop">).repo);
       return {} as OutputOf<C>;
     case "flow:chat.history":
-      return session.history() as OutputOf<C>;
+      return manager.history((input as InputOf<"flow:chat.history">).repo) as OutputOf<C>;
     case "flow:chat.reset":
-      await session.reset();
+      await manager.reset((input as InputOf<"flow:chat.reset">).repo);
       return {} as OutputOf<C>;
     case "flow:chat.state":
-      return session.state() as OutputOf<C>;
+      return manager.state((input as InputOf<"flow:chat.state">).repo) as OutputOf<C>;
     case "flow:question.answer": {
       const body = input as InputOf<"flow:question.answer">;
-      session.answer(body.questionId, body.answers);
+      manager.answer(body.repo, body.questionId, body.answers);
       return {} as OutputOf<C>;
     }
-    case "flow:question.skip":
-      session.skip((input as InputOf<"flow:question.skip">).questionId);
+    case "flow:question.skip": {
+      const body = input as InputOf<"flow:question.skip">;
+      manager.skip(body.repo, body.questionId);
       return {} as OutputOf<C>;
+    }
     case "flow:rules.list":
-      return files.listRules() as OutputOf<C>;
-    case "flow:rules.read":
-      return files.readRule((input as InputOf<"flow:rules.read">).name) as OutputOf<C>;
-    case "flow:rules.write":
-      return files.writeRule(input as InputOf<"flow:rules.write">) as OutputOf<C>;
-    case "flow:rules.delete":
-      files.deleteRule((input as InputOf<"flow:rules.delete">).name);
+      return files.listRules(manager.repoPath((input as InputOf<"flow:rules.list">).repo)) as OutputOf<C>;
+    case "flow:rules.read": {
+      const body = input as InputOf<"flow:rules.read">;
+      return files.readRule(manager.repoPath(body.repo), body.name) as OutputOf<C>;
+    }
+    case "flow:rules.write": {
+      const body = input as InputOf<"flow:rules.write">;
+      return files.writeRule(manager.repoPath(body.repo), {
+        name: body.name,
+        description: body.description,
+        alwaysApply: body.alwaysApply,
+        globs: body.globs,
+        body: body.body,
+      }) as OutputOf<C>;
+    }
+    case "flow:rules.delete": {
+      const body = input as InputOf<"flow:rules.delete">;
+      files.deleteRule(manager.repoPath(body.repo), body.name);
       return {} as OutputOf<C>;
+    }
     case "flow:skills.list":
-      return files.listSkills() as OutputOf<C>;
-    case "flow:skills.read":
-      return files.readSkill((input as InputOf<"flow:skills.read">).name) as OutputOf<C>;
-    case "flow:skills.write":
-      return files.writeSkill(input as InputOf<"flow:skills.write">) as OutputOf<C>;
-    case "flow:skills.delete":
-      files.deleteSkill((input as InputOf<"flow:skills.delete">).name);
+      return files.listSkills(manager.repoPath((input as InputOf<"flow:skills.list">).repo)) as OutputOf<C>;
+    case "flow:skills.read": {
+      const body = input as InputOf<"flow:skills.read">;
+      return files.readSkill(manager.repoPath(body.repo), body.name) as OutputOf<C>;
+    }
+    case "flow:skills.write": {
+      const body = input as InputOf<"flow:skills.write">;
+      return files.writeSkill(manager.repoPath(body.repo), {
+        name: body.name,
+        description: body.description,
+        body: body.body,
+      }) as OutputOf<C>;
+    }
+    case "flow:skills.delete": {
+      const body = input as InputOf<"flow:skills.delete">;
+      files.deleteSkill(manager.repoPath(body.repo), body.name);
       return {} as OutputOf<C>;
+    }
     case "flow:agentsmd.read":
-      return files.readAgents() as OutputOf<C>;
-    case "flow:agentsmd.write":
-      return files.writeAgents((input as InputOf<"flow:agentsmd.write">).body) as OutputOf<C>;
+      return files.readAgents(manager.repoPath((input as InputOf<"flow:agentsmd.read">).repo)) as OutputOf<C>;
+    case "flow:agentsmd.write": {
+      const body = input as InputOf<"flow:agentsmd.write">;
+      return files.writeAgents(manager.repoPath(body.repo), body.body) as OutputOf<C>;
+    }
     default:
       return assertNever(channel);
   }

@@ -376,3 +376,51 @@ label { display: block; font-size: 13px; margin: 12px 0 4px; }
 @media (prefers-reduced-motion: reduce) {
   .bot svg, .bot .eyes, .bot .leaf, .bot .halo { animation: none; }
 }
+.app > .shell { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.sidebar {
+  width: 196px;
+  flex: none;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow: auto;
+}
+.repo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.repo-row, .mention-hit {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+.repo-row.active, .mention-hit.active { background: var(--soft); border-color: var(--line); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.running { background: var(--info); }
+.dot.waiting { background: var(--warn); }
+.dot.error { background: var(--danger); }
+.dot.idle { background: var(--ok); }
+.unseen { margin-left: auto; color: var(--accent); font-size: 11px; }
+.home { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.mention { position: relative; flex: 1; }
+.mention textarea { width: 100%; }
+.mention-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.shell > .chat, .shell > .editor, .shell > .home { flex: 1; min-width: 0; }

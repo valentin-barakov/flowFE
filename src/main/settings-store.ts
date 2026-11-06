@@ -1,6 +1,6 @@
 // settings.json, chats/<folderId>.json, and the encrypted key. One writer. Temp file, then rename.
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync, type Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { MessageSchema, type Message, type Settings, type Theme } from "../shared/ipc.js";
@@ -36,14 +36,26 @@ const ChatFileSchema = z.object({
 const EMPTY_SETTINGS: SettingsFile = { folder: null, model: null, theme: "system" };
 const EMPTY_CHAT: ChatFile = { agentId: null, messages: [] };
 
+function serialize(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+// EMPTY_CHAT_BYTES depends on serialize.
+const EMPTY_CHAT_BYTES = Buffer.byteLength(serialize(EMPTY_CHAT));
+
+export type RepoRecord = { name: string; path: string };
+
 export type SettingsStore = {
   view(): Settings;
   save(partial: { folder?: string; model?: string; theme?: Theme }): Settings;
   setKey(key: string): void;
   clearKey(): void;
   readKey(): string | null;
-  readChat(): ChatFile;
-  writeChat(chat: ChatFile): void;
+  listRepos(root: string): RepoRecord[];
+  readChat(repoPath: string): ChatFile;
+  writeChat(repoPath: string, chat: ChatFile): void;
+  /** True when the chat file is larger than an empty chat and is not only an agentId with no messages. */
+  hasChatHistory(repoPath: string): boolean;
 };
 
 export function createSettingsStore(options: { userDataDir: string; secrets: SecretBox }): SettingsStore {
@@ -109,25 +121,85 @@ export function createSettingsStore(options: { userDataDir: string; secrets: Sec
     }
   }
 
-  function chatFile(): string | null {
-    const folder = readSettings().folder;
-    if (folder === null || !isDirectory(folder)) return null;
-    return path.join(chatsDir, `${folderId(folder)}.json`);
+  function listRepos(root: string): RepoRecord[] {
+    let resolved: string;
+    try {
+      resolved = realpathSync(root);
+    } catch {
+      return [];
+    }
+    if (!isDirectory(resolved)) return [];
+    if (hasGit(resolved)) return [{ name: ".", path: resolved }];
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(resolved, { withFileTypes: true });
+    } catch {
+      return [{ name: ".", path: resolved }];
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    const found: RepoRecord[] = [];
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name === ".." || entry.name.includes("/") || entry.name.includes("\\") || /[\s@]/.test(entry.name)) continue;
+      const child = path.join(resolved, entry.name);
+      let real: string;
+      try {
+        real = realpathSync(child);
+      } catch {
+        continue;
+      }
+      if (!isDirectory(real) || !hasGit(real) || seen.has(real)) continue;
+      seen.add(real);
+      found.push({ name: entry.name, path: real });
+    }
+    if (found.length === 0) return [{ name: ".", path: resolved }];
+    return found;
   }
 
-  function readChat(): ChatFile {
-    const file = chatFile();
+  function chatPath(repoPath: string): string | null {
+    let resolved: string;
+    try {
+      resolved = realpathSync(repoPath);
+    } catch {
+      return null;
+    }
+    if (!isDirectory(resolved)) return null;
+    return path.join(chatsDir, `${folderId(resolved)}.json`);
+  }
+
+  function readChat(repoPath: string): ChatFile {
+    const file = chatPath(repoPath);
     if (file === null) return EMPTY_CHAT;
     return readJson(file, ChatFileSchema, EMPTY_CHAT);
   }
 
-  function writeChat(chat: ChatFile): void {
-    const file = chatFile();
+  function writeChat(repoPath: string, chat: ChatFile): void {
+    const file = chatPath(repoPath);
     if (file === null) throw new Error("Choose a folder before saving the chat.");
     writeJson(file, chat);
   }
 
-  return { view, save, setKey, clearKey, readKey, readChat, writeChat };
+  function hasChatHistory(repoPath: string): boolean {
+    const file = chatPath(repoPath);
+    if (file === null) return false;
+    let size: number;
+    try {
+      size = statSync(file).size;
+    } catch {
+      return false;
+    }
+    if (size <= EMPTY_CHAT_BYTES) return false;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (hasMessages(parsed)) return true;
+      if (isAgentIdOnly(parsed)) return false;
+    } catch {
+      // Larger than an empty chat, and not an agentId with no messages.
+    }
+    return true;
+  }
+
+  return { view, save, setKey, clearKey, readKey, listRepos, readChat, writeChat, hasChatHistory };
 }
 
 function resolveFolder(folder: string): string {
@@ -144,6 +216,15 @@ function resolveFolder(folder: string): string {
 function isDirectory(folder: string): boolean {
   try {
     return statSync(folder).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function hasGit(dir: string): boolean {
+  try {
+    statSync(path.join(dir, ".git"));
+    return true;
   } catch {
     return false;
   }
@@ -172,7 +253,22 @@ function readJson<T>(file: string, schema: z.ZodType<T>, fallback: T): T {
 }
 
 function writeJson(file: string, value: unknown): void {
-  writeAtomic(file, JSON.stringify(value, null, 2));
+  writeAtomic(file, serialize(value));
+}
+
+function hasMessages(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const messages = (value as { messages?: unknown }).messages;
+  return Array.isArray(messages) && messages.length > 0;
+}
+
+function isAgentIdOnly(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as { agentId?: unknown; messages?: unknown };
+  if (typeof record.agentId !== "string") return false;
+  if (!Array.isArray(record.messages) || record.messages.length !== 0) return false;
+  const keys = Object.keys(record);
+  return keys.length === 2 && keys.includes("agentId") && keys.includes("messages");
 }
 
 function writeBytes(file: string, data: Buffer): void {

@@ -12,11 +12,12 @@ type Draft = {
 const EMPTY: Draft = { name: "", description: "", alwaysApply: false, globs: "", body: "" };
 
 type RulesEditorProps = {
+  repo: string;
   onChanged: () => Promise<boolean>;
   onDirty: (dirty: boolean) => void;
 };
 
-export function RulesEditor({ onChanged, onDirty }: RulesEditorProps) {
+export function RulesEditor({ repo, onChanged, onDirty }: RulesEditorProps) {
   const [rules, setRules] = useState<RuleSummary[]>([]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [baseline, setBaseline] = useState(JSON.stringify(EMPTY));
@@ -37,10 +38,10 @@ export function RulesEditor({ onChanged, onDirty }: RulesEditorProps) {
   useEffect(() => {
     const current = ++token.current;
     void loadList(current);
-  }, []);
+  }, [repo]);
 
   async function loadList(current: number): Promise<RuleSummary[] | null> {
-    const listed = await window.flow.invoke("flow:rules.list", {});
+    const listed = await window.flow.invoke("flow:rules.list", { repo });
     if (current !== token.current) return null;
     if (!listed.ok) {
       setError(listed.error.message);
@@ -70,7 +71,7 @@ export function RulesEditor({ onChanged, onDirty }: RulesEditorProps) {
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     const current = ++token.current;
     setBusy(true);
-    const result = await window.flow.invoke("flow:rules.read", { name });
+    const result = await window.flow.invoke("flow:rules.read", { repo, name });
     setBusy(false);
     if (current !== token.current) return;
     if (!result.ok) {
@@ -93,6 +94,7 @@ export function RulesEditor({ onChanged, onDirty }: RulesEditorProps) {
     setBusy(true);
     setError(null);
     const result = await window.flow.invoke("flow:rules.write", {
+      repo,
       name,
       description: draft.description,
       alwaysApply: draft.alwaysApply,
@@ -118,7 +120,7 @@ export function RulesEditor({ onChanged, onDirty }: RulesEditorProps) {
     setConfirming(false);
     setBusy(true);
     setError(null);
-    const result = await window.flow.invoke("flow:rules.delete", { name: selected });
+    const result = await window.flow.invoke("flow:rules.delete", { repo, name: selected });
     if (!result.ok) {
       setBusy(false);
       setError(result.error.message);

@@ -1,6 +1,7 @@
 // One chat state, one run. The renderer mirrors this; it does not decide it.
 import { randomUUID } from "node:crypto";
-import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Settings, Theme } from "../shared/ipc.js";
+import { statSync } from "node:fs";
+import { busyRepoMessage, type Answers, type ChatStateName, type FlowEvent, type Message, type PendingQuestion } from "../shared/ipc.js";
 import {
   QUESTION_BUSY,
   QUESTION_CANCELLED,
@@ -47,12 +48,13 @@ type RunRecord = {
   text: string;
 };
 
-export type ChatSession = {
-  view(): Settings;
-  save(partial: { folder?: string; model?: string; theme?: Theme }): Promise<Settings>;
-  setKey(key: string): Promise<void>;
-  clearKey(): Promise<void>;
-  listModels(): Promise<{ id: string; label: string }[]>;
+/** `FlowEvent` already requires `repo`. Call sites build the rest; the session wrapper sets it. */
+type OmitKey<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type EventWithoutRepo = OmitKey<FlowEvent, "repo">;
+
+export type RepoSession = {
+  path(): string;
+  isBusy(): boolean;
   reset(): Promise<void>;
   send(text: string): Promise<{ runId: string; userMessageId: string; agentMessageId: string; restored: boolean }>;
   stop(): Promise<void>;
@@ -61,17 +63,22 @@ export type ChatSession = {
   skip(questionId: string): void;
   history(): { messages: Message[] };
   state(): { state: ChatStateName; runId?: string; instructionsPending: boolean; pendingQuestion?: PendingQuestion };
+  dispose(): Promise<void>;
   shutdown(): Promise<void>;
-  isShuttingDown(): boolean;
 };
 
-export function createChatSession(options: {
+export function createRepoSession(options: {
+  repoName: string;
+  repoPath: string;
   store: SettingsStore;
   agents: AgentService;
   files: Pick<RulesSkills, "seenDirty" | "clearDirty">;
   emit: (event: FlowEvent) => void;
-}): ChatSession {
-  const { store, agents, files, emit } = options;
+}): RepoSession {
+  const { repoName, repoPath, store, agents, files } = options;
+  const emit = (event: EventWithoutRepo): void => {
+    options.emit({ ...event, repo: repoName } as FlowEvent);
+  };
   let state: ChatStateName = store.view().setupComplete ? "ready" : "needsSetup";
   let run: RunRecord | null = null;
   let pending: Pending | null = null;
@@ -79,8 +86,7 @@ export function createChatSession(options: {
   let shuttingDown = false;
 
   function emitState(): void {
-    const event: FlowEvent = { type: "chat.state", runId: run?.id ?? "session", state };
-    emit(event);
+    emit({ type: "chat.state", runId: run?.id ?? "session", state });
   }
 
   function refreshIdle(): void {
@@ -88,63 +94,14 @@ export function createChatSession(options: {
     state = store.view().setupComplete ? "ready" : "needsSetup";
   }
 
-  function view(): Settings {
-    refreshIdle();
-    return store.view();
-  }
-
-  async function save(partial: { folder?: string; model?: string; theme?: Theme }): Promise<Settings> {
-    if ((partial.folder !== undefined || partial.model !== undefined) && isBusy()) {
-      throw new SessionError("conflict", "Wait for the current message to finish", false);
-    }
-    const previous = store.view().folder;
-    let next: Settings;
-    try {
-      next = store.save(partial);
-    } catch (error) {
-      throw new SessionError("io_error", errorText(error), false);
-    }
-    if (next.folder !== previous) {
-      closePending();
-      await agents.dispose();
-    }
-    refreshIdle();
-    emitState();
-    return next;
-  }
-
-  async function setKey(key: string): Promise<void> {
-    if (isBusy()) throw new SessionError("conflict", "Wait for the current message to finish", false);
-    try {
-      store.setKey(key);
-    } catch (error) {
-      throw new SessionError("io_error", errorText(error), false);
-    }
-    closePending();
-    await agents.dispose();
-    refreshIdle();
-    emitState();
-  }
-
-  async function clearKey(): Promise<void> {
-    if (isBusy()) throw new SessionError("conflict", "Wait for the current message to finish", false);
-    store.clearKey();
-    closePending();
-    await agents.dispose();
-    refreshIdle();
-    emitState();
-  }
-
   async function reset(): Promise<void> {
     if (shuttingDown) throw new SessionError("not_ready", "The app is closing", false);
     if (isBusy()) throw new SessionError("conflict", "Wait for the current message to finish", false);
-    const current = store.view();
-    if (current.folder === null) throw new SessionError("not_ready", "Choose a folder first", false);
-    if (current.folderMissing) throw new SessionError("not_ready", "That folder is missing.", false);
+    if (repoGone()) throw new SessionError("not_ready", "That folder is missing.", false);
     closePending();
     await agents.dispose();
     try {
-      store.writeChat({ agentId: null, messages: [] });
+      store.writeChat(repoPath, { agentId: null, messages: [] });
     } catch (error) {
       throw new SessionError("io_error", errorText(error), false);
     }
@@ -152,23 +109,12 @@ export function createChatSession(options: {
     emitState();
   }
 
-  async function listModels(): Promise<{ id: string; label: string }[]> {
-    const key = store.readKey();
-    if (key === null) throw new SessionError("auth", "Save a Cursor key first", false);
-    try {
-      return await agents.listModels(key);
-    } catch (error) {
-      throw asSessionError(error);
-    }
-  }
-
   function history(): { messages: Message[] } {
-    return { messages: store.readChat().messages };
+    return { messages: store.readChat(repoPath).messages };
   }
 
   function instructionsPending(): boolean {
-    const folder = store.view().folder;
-    return folder !== null && files.seenDirty(folder) !== 0;
+    return files.seenDirty(repoPath) !== 0;
   }
 
   function stateValue(): { state: ChatStateName; runId?: string; instructionsPending: boolean; pendingQuestion?: PendingQuestion } {
@@ -182,7 +128,9 @@ export function createChatSession(options: {
 
   async function send(text: string): Promise<{ runId: string; userMessageId: string; agentMessageId: string; restored: boolean }> {
     refreshIdle();
-    if (isBusy()) throw new SessionError("conflict", "A message is already running", false);
+    if (isBusy()) {
+      throw new SessionError("conflict", busyRepoMessage(repoName), false);
+    }
     const current = store.view();
     const key = store.readKey();
     if (current.folderMissing) {
@@ -195,16 +143,21 @@ export function createChatSession(options: {
       emitState();
       throw new SessionError("not_ready", "Finish setup first", false);
     }
+    if (repoGone()) {
+      state = "needsSetup";
+      emitState();
+      throw new SessionError("not_ready", "That folder is missing.", false);
+    }
 
     agents.prepare();
-    const prior = store.readChat();
+    const prior = store.readChat(repoPath);
     const seed = selectSeed(prior.messages);
-    const seenInstructions = files.seenDirty(current.folder);
+    const seenInstructions = files.seenDirty(repoPath);
     const fresh = seenInstructions !== 0;
     const now = new Date().toISOString();
     const userMessage: Message = { id: randomUUID(), role: "user", text, at: now };
     const agentMessage: Message = { id: randomUUID(), role: "agent", text: "", at: now, status: "interrupted" };
-    store.writeChat({ agentId: prior.agentId, messages: [...prior.messages, userMessage, agentMessage] });
+    store.writeChat(repoPath, { agentId: prior.agentId, messages: [...prior.messages, userMessage, agentMessage] });
 
     const nextGeneration = ++generation;
     run = {
@@ -223,16 +176,16 @@ export function createChatSession(options: {
       const ensured = await agents.ensure({
         apiKey: key,
         modelId: current.model,
-        cwd: current.folder,
+        cwd: repoPath,
         agentId: fresh ? null : prior.agentId,
         fresh,
       });
       if (isStale(nextGeneration)) return { ...ids, restored: false };
       if (ensured.agentId !== prior.agentId) {
-        const latest = store.readChat();
-        store.writeChat({ agentId: ensured.agentId, messages: latest.messages });
+        const latest = store.readChat(repoPath);
+        store.writeChat(repoPath, { agentId: ensured.agentId, messages: latest.messages });
       }
-      if (fresh) files.clearDirty(current.folder, seenInstructions);
+      if (fresh) files.clearDirty(repoPath, seenInstructions);
       const prompt = buildPrompt(text, fresh || ensured.restored ? seed : null);
       await agents.beginSend({
         apiKey: key,
@@ -285,8 +238,8 @@ export function createChatSession(options: {
       at: new Date().toISOString(),
     };
     try {
-      const chat = store.readChat();
-      store.writeChat({ agentId: chat.agentId, messages: insertBefore(chat.messages, currentRun.agentMessageId, message) });
+      const chat = store.readChat(repoPath);
+      store.writeChat(repoPath, { agentId: chat.agentId, messages: insertBefore(chat.messages, currentRun.agentMessageId, message) });
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new Error("The question could not be saved"));
     }
@@ -332,15 +285,17 @@ export function createChatSession(options: {
     patch: (message: Extract<Message, { role: "question" }>) => Message,
   ): void {
     if (run === null) throw new SessionError("not_found", "That question is closed", false);
-    const chat = store.readChat();
-    const messages = chat.messages.map((message): Message => {
-      if (message.role !== "question" || message.questionId !== current.questionId) return message;
-      return patch(message);
-    });
-    try {
-      store.writeChat({ agentId: chat.agentId, messages });
-    } catch (error) {
-      throw new SessionError("io_error", errorText(error), false);
+    if (!repoGone()) {
+      const chat = store.readChat(repoPath);
+      const messages = chat.messages.map((message): Message => {
+        if (message.role !== "question" || message.questionId !== current.questionId) return message;
+        return patch(message);
+      });
+      try {
+        store.writeChat(repoPath, { agentId: chat.agentId, messages });
+      } catch (error) {
+        throw new SessionError("io_error", errorText(error), false);
+      }
     }
     if (pending !== current) throw new SessionError("not_found", "That question is closed", false);
     pending = null;
@@ -395,7 +350,7 @@ export function createChatSession(options: {
   function persistTool(current: number, event: Extract<AgentStreamEvent, { type: "tool" }>): void {
     if (run === null || run.generation !== current) return;
     const agentMessageId = run.agentMessageId;
-    const chat = store.readChat();
+    const chat = store.readChat(repoPath);
     const status: "ok" | "error" = event.status === "error" ? "error" : "ok";
     const existing = chat.messages.some((message) => message.id === event.toolCallId);
     const messages: Message[] = existing
@@ -411,20 +366,22 @@ export function createChatSession(options: {
           status,
           at: new Date().toISOString(),
         });
-    store.writeChat({ agentId: chat.agentId, messages });
+    store.writeChat(repoPath, { agentId: chat.agentId, messages });
   }
 
   function settle(current: number, kind: "end" | "stopped" | "error", failure?: SessionError): void {
     if (run === null || run.generation !== current || run.settled) return;
     run.settled = true;
     const currentRun = run;
-    const chat = store.readChat();
-    const messages = chat.messages.map((message): Message => {
-      if (message.id !== currentRun.agentMessageId || message.role !== "agent") return message;
-      const status = kind === "end" ? "done" : kind === "stopped" ? "stopped" : "error";
-      return { id: message.id, role: "agent", text: currentRun.text, at: message.at, status };
-    });
-    store.writeChat({ agentId: chat.agentId, messages });
+    if (!repoGone()) {
+      const chat = store.readChat(repoPath);
+      const messages = chat.messages.map((message): Message => {
+        if (message.id !== currentRun.agentMessageId || message.role !== "agent") return message;
+        const status = kind === "end" ? "done" : kind === "stopped" ? "stopped" : "error";
+        return { id: message.id, role: "agent", text: currentRun.text, at: message.at, status };
+      });
+      store.writeChat(repoPath, { agentId: chat.agentId, messages });
+    }
     if (kind === "error" && failure) {
       emit({
         type: "chat.error",
@@ -454,23 +411,32 @@ export function createChatSession(options: {
     return state === "streaming" || state === "stopping" || state === "awaitingAnswer";
   }
 
-  async function shutdown(): Promise<void> {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  function repoGone(): boolean {
+    try {
+      return !statSync(repoPath).isDirectory();
+    } catch {
+      return true;
+    }
+  }
+
+  async function dispose(): Promise<void> {
     if (run && !run.settled) {
       run.abandoned = true;
       run.settled = true;
     }
     closePending();
-    await Promise.race([agents.dispose(), new Promise<void>((resolve) => setTimeout(resolve, 3_000))]);
+    await agents.dispose();
+  }
+
+  async function shutdown(): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    await dispose();
   }
 
   return {
-    view,
-    save,
-    setKey,
-    clearKey,
-    listModels,
+    path: () => repoPath,
+    isBusy,
     reset,
     send,
     stop,
@@ -479,8 +445,8 @@ export function createChatSession(options: {
     skip,
     history,
     state: stateValue,
+    dispose,
     shutdown,
-    isShuttingDown: () => shuttingDown,
   };
 }
 

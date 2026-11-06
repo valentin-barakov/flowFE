@@ -27,6 +27,7 @@ type ErrorCode =
 - `chat.send` returns once the run has started. That includes opening or resuming the agent, which can take up to 10 seconds. It does not stay open for the whole answer, so Stop still works. The returned ids are the user message and the agent message for this run. The window holds events that arrive before the result, then paints them.
 - The `flow:chat.state` command omits `runId` when no run is active. While a run is active, that command and the events use that run's id. A `chat.state` event uses `runId` `"session"` when nothing is running.
 - The renderer applies every `chat.state` event. It ignores any other event for a run that `chat.done` or `chat.error` already sealed, and any event whose `runId` differs from the run that is currently active.
+- Commands that touch a chat, a question, rules, skills, or `AGENTS.md` take `repo`. `repo` is `.` when the workspace folder is the only repo, otherwise a direct child directory name. Main resolves it against the scanned repo list. An unknown name returns `not_found`. No command returns a repo path.
 - No command returns the API key, the `agentId`, or a path outside the chosen folder.
 
 ## Commands
@@ -41,23 +42,24 @@ type ErrorCode =
 | `flow:key.clear` | none | `{}` | Renames `secrets.bin` aside. It does not return the key |
 | `flow:folder.pick` | none | `{ folder: string \| null }` | Opens the native dialog in main; `null` on cancel |
 | `flow:models.list` | none | `{ models: { id, label }[] }` | Needs the key |
-| `flow:chat.send` | `{ text }` | `{ runId, userMessageId, agentMessageId, restored }` | `text` is trimmed, then 1 to 50 000 characters. `not_ready` when setup is incomplete. `conflict` when a run is already in flight. Returns once the run has started. `restored` is true when resume failed and the prompt included the last 20 text messages, each clipped to 8 000 characters. A rules or skills edit also seeds that transcript, and leaves `restored` false |
-| `flow:chat.stop` | none | `{}` | Cancels the run and rejects a pending question |
-| `flow:chat.history` | none | `{ messages: Message[] }` | |
-| `flow:chat.state` | none | `{ state, runId?, instructionsPending, pendingQuestion? }` | Called on renderer start to resume the view. `runId` is omitted when no run is active. `instructionsPending` is true after a rules, skills, or `AGENTS.md` save until the next send creates a new agent. `pendingQuestion` is `{ questionId, title?, questions }` while a form is open. It is omitted otherwise. A window reload reads it and shows the same form |
-| `flow:chat.reset` | none | `{}` | "New chat": drops `agentId` and messages for this folder |
-| `flow:question.answer` | `{ questionId, answers }` | `{}` | `answers` as below |
-| `flow:question.skip` | `{ questionId }` | `{}` | |
-| `flow:rules.list` | none | `RuleSummary[]` | `{ name, description, alwaysApply }` |
-| `flow:rules.read` | `{ name }` | `Rule` | |
-| `flow:rules.write` | `{ name, description, alwaysApply, globs, body }` | `Rule` | Creates or overwrites. The New button uses this. An identical file does not set `instructionsPending` |
-| `flow:rules.delete` | `{ name }` | `{}` | The UI confirms first |
-| `flow:skills.list` | none | `SkillSummary[]` | `{ name, description }` |
-| `flow:skills.read` | `{ name }` | `Skill` | |
-| `flow:skills.write` | `{ name, description, body }` | `Skill` | Creates or overwrites `.cursor/skills/<name>/SKILL.md` |
-| `flow:skills.delete` | `{ name }` | `{}` | Removes the skill folder. The UI confirms first |
+| `flow:repos.list` | none | `{ repos: { name, state, pendingQuestion, hasHistory }[] }` | `hasHistory` is true when that repo's chat file has any message. `pendingQuestion` is true while a form is open in that repo |
+| `flow:chat.send` | `{ repo, text }` | `{ runId, userMessageId, agentMessageId, restored }` | `text` is trimmed, then 1 to 50 000 characters. `not_ready` when setup is incomplete. `conflict` when that repo is not `ready`, and also when 7 other repos are busy, with the message "Seven agents are already running. Stop one before starting another." `not_found` when the repo name is unknown. Returns once the run has started. `restored` is true when resume failed and the prompt included the last 20 text messages, each clipped to 8 000 characters. A rules or skills edit also seeds that transcript, and leaves `restored` false |
+| `flow:chat.stop` | `{ repo }` | `{}` | Cancels the run and rejects a pending question |
+| `flow:chat.history` | `{ repo }` | `{ messages: Message[] }` | |
+| `flow:chat.state` | `{ repo }` | `{ state, runId?, instructionsPending, pendingQuestion? }` | Called on renderer start to resume the view. `runId` is omitted when no run is active. `instructionsPending` is true after a rules, skills, or `AGENTS.md` save until the next send creates a new agent. `pendingQuestion` is `{ questionId, title?, questions }` while a form is open. It is omitted otherwise. A window reload reads it and shows the same form |
+| `flow:chat.reset` | `{ repo }` | `{}` | Reset chat: drops `agentId` and messages for this repo |
+| `flow:question.answer` | `{ repo, questionId, answers }` | `{}` | `answers` as below |
+| `flow:question.skip` | `{ repo, questionId }` | `{}` | |
+| `flow:rules.list` | `{ repo }` | `RuleSummary[]` | `{ name, description, alwaysApply }` |
+| `flow:rules.read` | `{ repo, name }` | `Rule` | |
+| `flow:rules.write` | `{ repo, name, description, alwaysApply, globs, body }` | `Rule` | Creates or overwrites. The New button uses this. An identical file does not set `instructionsPending` |
+| `flow:rules.delete` | `{ repo, name }` | `{}` | The UI confirms first |
+| `flow:skills.list` | `{ repo }` | `SkillSummary[]` | `{ name, description }` |
+| `flow:skills.read` | `{ repo, name }` | `Skill` | |
+| `flow:skills.write` | `{ repo, name, description, body }` | `Skill` | Creates or overwrites `.cursor/skills/<name>/SKILL.md` |
+| `flow:skills.delete` | `{ repo, name }` | `{}` | Removes the skill folder. The UI confirms first |
 
-`AGENTS.md` is not a rule or a skill. `flow:agentsmd.read` takes no input and returns `{ body }`. `flow:agentsmd.write` takes `{ body }` of at most 200 000 characters and returns `{ body }`. An empty body writes an empty file.
+`AGENTS.md` is not a rule or a skill. `flow:agentsmd.read` takes `{ repo }` and returns `{ body }`. `flow:agentsmd.write` takes `{ repo, body }` of at most 200 000 characters and returns `{ body }`. An empty body writes an empty file.
 
 ### Question answers
 
@@ -69,7 +71,7 @@ type Answers = Record<string /* questionId */, { selected: string[] /* optionIds
 
 ## Events
 
-All events arrive on `flow:event` with a `type` discriminator and a `runId`. The preload drops a payload that does not match `EventSchema`. The renderer applies every `chat.state` event. It ignores any other event for a run that `chat.done` or `chat.error` already sealed, and any event whose `runId` differs from the run that is currently active.
+All events arrive on `flow:event` with a `type` discriminator and a `runId`. Every event includes `repo` as well as `runId`. The preload drops a payload that does not match `EventSchema`. The renderer applies an event to that repo's slice, and still drops a non-`chat.state` event whose `runId` is not that slice's active run.
 
 | `type` | Payload | Meaning |
 |--------|---------|---------|

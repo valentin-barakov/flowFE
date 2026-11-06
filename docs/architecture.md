@@ -1,6 +1,6 @@
 # Architecture
 
-Mango is two processes. The Electron **main** process owns everything with authority: the API key, the folder, the files, the agent, and the pending question. The **renderer** is a React view with no Node access. It sends validated commands and paints events. Main is the source of truth; the renderer holds nothing that cannot be rebuilt by asking main.
+Mango is two processes. The Electron **main** process owns everything with authority: the API key, the workspace folder, the repo files, one agent per repo, and each repo's pending question. The **renderer** is a React view with no Node access. It sends validated commands and paints events. Main is the source of truth; the renderer holds nothing that cannot be rebuilt by asking main.
 
 ## Context
 
@@ -30,8 +30,9 @@ flowchart TB
     Index --> Settings["settings-store.ts: settings, key, chat files"]
     Index --> Files["rules-skills-service.ts: allowlisted file access"]
     Index --> Agent["agent-service.ts: only importer of @cursor/sdk"]
-    Index --> Session["chat-session.ts: state machine, run, pending question"]
-    Ipc --> Session
+    Index --> Manager["session-manager.ts: one RepoSession per repo"]
+    Ipc --> Manager
+    Manager --> Session["chat-session.ts: one repo's state, run, question"]
     Ipc --> Files
     Session --> Agent
     Session --> Settings
@@ -47,10 +48,11 @@ flowchart TB
 | `settings-store.ts` | `settings.json`, chat files, the encrypted key (via an injected `safeStorage`) | Return the key to the renderer |
 | `rules-skills-service.ts` | Reading and writing rules, skills, `AGENTS.md` inside the allowlist | Touch any path outside it |
 | `agent-service.ts` | `Agent.create`, `Agent.resume`, `send`, stream mapping, cancel, dispose | Know about IPC or the UI |
-| `chat-session.ts` | The session state machine, the current run, the pending question | Call Electron APIs |
+| `session-manager.ts` | The repo map, lazy `AgentService` per repo, global busy checks, shutdown | Call the SDK itself |
+| `chat-session.ts` | One repo's state machine, current run, and pending question | Call Electron APIs |
 | `prompt.ts` | The text of each send: project-wins line, ask-tool line, optional transcript | Call the SDK, IPC, or the filesystem |
 
-`chat-session.ts` is the one place that coordinates; the others are leaves. `ipc.ts` calls the session for settings, the key, the chat, and questions, and calls `rules-skills-service` for files. It does not call the settings store itself. `agent-service.ts` translates SDK messages into Mango's own event type (`delta`, `tool` with status `running`, `ok`, or `error`, `done`, `error`), so a beta SDK change stays inside that file (the sibling project's spikes S1 to S3 used SDK 1.2.0, which is pinned).
+`chat-session.ts` is the one place that coordinates; the others are leaves. `ipc.ts` calls the session manager for settings, the key, the chat, and questions, and calls `rules-skills-service` for files. It does not call the settings store itself. `agent-service.ts` translates SDK messages into Mango's own event type (`delta`, `tool` with status `running`, `ok`, or `error`, `done`, `error`), so a beta SDK change stays inside that file (the sibling project's spikes S1 to S3 used SDK 1.2.0, which is pinned).
 
 ## Data ownership
 
@@ -58,13 +60,13 @@ flowchart TB
 |------|-------|-----------|------------------|
 | Cursor API key | `settings-store` | `userData/secrets.bin`, encrypted with `safeStorage`, mode `0600` | Only "is set" |
 | Settings (folder, model, theme) | `settings-store` | `userData/settings.json` | Yes. Theme is `system` (the default), `light`, or `dark` |
-| Chat messages and `agentId` | `settings-store` | `userData/chats/<folderId>.json` | Messages, yes; `agentId`, no |
+| Chat messages and `agentId` | `settings-store` | `userData/chats/<repoId>.json` | Messages, yes; `agentId`, no |
 | Rules, skills, `AGENTS.md` | `rules-skills-service` | The user's folder (`.cursor/`), shared with Cursor IDE | Yes, through commands |
 | Current run and pending question | `chat-session` | Memory in main | Through events and `chat.state` |
 
 `userData` is Electron's path for this app, `~/Library/Application Support/Mango`. On the first launch, if that directory is missing and `~/Library/Application Support/flowfe` exists, main renames the old directory to `Mango`. Clearing the key renames `secrets.bin` aside (`secrets.bin.<time>.cleared`) instead of deleting it in place. A settings or chat file that does not parse is renamed aside (`*.corrupt`) and the empty value is used.
 
-`folderId` is the SHA-256 hex of the folder's real path. One folder has one chat. Changing the folder switches to that folder's chat; it does not delete the old one.
+`repoId` is a hash of the repo's real path. One repo has one chat. The workspace folder is `settings.folder`. Changing it disposes every session and switches to the new workspace's chats. It does not delete the old files.
 
 ## Patterns used
 
@@ -92,7 +94,7 @@ flowchart TB
 No global state library. One reducer in `renderer/state.ts`. After load, the window shows one of three screens:
 
 - **Setup**: key, folder, model, and theme, until all of key, folder, and model exist. Chat can open it again; once setup is complete it has Back to chat.
-- **Chat**: the reducer fed by `chat.history` plus the event stream. It renders text, tool lines, the question card, the banner, a model picker, the theme switch, New chat, and a Rules button. New chat asks for confirmation, then calls `chat.reset`.
+- **Chat**: the reducer fed by `chat.history` plus the event stream. It renders text, tool lines, the question card, the banner, a model picker, the theme switch, Reset chat, and a Rules button. Reset chat asks for confirmation, then calls `chat.reset`.
 - **Rules and skills** (`Instructions.tsx`): tabs for rules, skills, and `AGENTS.md`. Rules and skills are a list on the left and a form on the right, with load / edit / save, a dirty flag, and the note that a saved change applies to the next message. `AGENTS.md` is one body field. Leaving the screen with unsaved edits asks for confirmation.
 
 `QuestionForm` takes the question as props and calls back with an answer or a skip. It checks the answer with `shared/questions.ts` before that callback. It does not know about the SDK.
@@ -101,16 +103,17 @@ No global state library. One reducer in `renderer/state.ts`. After load, the win
 
 ```text
 src/
-  main/       index.ts, window.ts, ipc.ts, chat-session.ts, agent-service.ts,
-              prompt.ts, rules-skills-service.ts, settings-store.ts
+  main/       index.ts, window.ts, ipc.ts, session-manager.ts, chat-session.ts,
+              agent-service.ts, prompt.ts, rules-skills-service.ts, settings-store.ts
   preload/    index.ts, bridge.ts
-  shared/     ipc.ts, questions.ts
-  renderer/   main.tsx, App.tsx, state.ts, Setup.tsx, Chat.tsx, QuestionForm.tsx,
+  shared/     ipc.ts, questions.ts, mention.ts
+  renderer/   main.tsx, App.tsx, state.ts, Setup.tsx, Chat.tsx, NewChat.tsx,
+              MentionComposer.tsx, RepoSidebar.tsx, QuestionForm.tsx,
               Instructions.tsx, RulesEditor.tsx, SkillsEditor.tsx, Bot.tsx,
               global.d.ts, styles.css
 docs/         this folder
 scripts/      phase0-spike.ts, phase2-files-check.mjs, phase3-questions-check.ts,
-              packaged-sdk-check.mjs, after-pack.cjs
+              mention-check.ts, repos-check.ts, packaged-sdk-check.mjs, after-pack.cjs
 ```
 
 `shared/` holds schemas, types, and question parsing: no I/O. `ipc.ts` is the command and event catalog. `questions.ts` is the ask-tool schema, answer checks, and the JSON returned to the agent. Main, preload, and renderer all import `shared/`.
@@ -121,4 +124,4 @@ An unsigned local `.app` via `electron-builder` (`dir` target, macOS arm64 only,
 
 ## Out of scope
 
-Windows and Linux, signing and auto-update, the cloud runtime, several agents, an orchestrator, a database, user-level `~/.cursor` editing, and GitHub integration.
+Windows and Linux, signing and auto-update, the cloud runtime, several chats per repo, an orchestrator, a database, user-level `~/.cursor` editing, and GitHub integration. At most 7 repo agents run at once.

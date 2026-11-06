@@ -21,21 +21,21 @@ export class FilesError extends Error {
 }
 
 export type RulesSkills = {
-  listRules(): RuleSummary[];
-  readRule(name: string): Rule;
-  writeRule(rule: Rule): Rule;
-  deleteRule(name: string): void;
-  listSkills(): SkillSummary[];
-  readSkill(name: string): Skill;
-  writeSkill(skill: Skill): Skill;
-  deleteSkill(name: string): void;
-  readAgents(): { body: string };
-  writeAgents(body: string): { body: string };
+  listRules(repoPath: string): RuleSummary[];
+  readRule(repoPath: string, name: string): Rule;
+  writeRule(repoPath: string, rule: Rule): Rule;
+  deleteRule(repoPath: string, name: string): void;
+  listSkills(repoPath: string): SkillSummary[];
+  readSkill(repoPath: string, name: string): Skill;
+  writeSkill(repoPath: string, skill: Skill): Skill;
+  deleteSkill(repoPath: string, name: string): void;
+  readAgents(repoPath: string): { body: string };
+  writeAgents(repoPath: string, body: string): { body: string };
   seenDirty(folder: string): number;
   clearDirty(folder: string, seen: number): void;
 };
 
-export function createRulesSkills(options: { folder(): string | null }): RulesSkills {
+export function createRulesSkills(): RulesSkills {
   const dirty = new Map<string, number>();
   let clock = 0;
 
@@ -62,8 +62,8 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     }
   }
 
-  function listRules(): RuleSummary[] {
-    const root = projectRoot(options.folder());
+  function listRules(repoPath: string): RuleSummary[] {
+    const root = projectRoot(repoPath);
     const dir = existingDir(root, [".cursor", "rules"]);
     if (dir === null) return [];
     const summaries: RuleSummary[] = [];
@@ -78,18 +78,18 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     return summaries;
   }
 
-  function readRule(name: string): Rule {
+  function readRule(repoPath: string, name: string): Rule {
     assertName(name);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const dir = existingDir(root, [".cursor", "rules"]);
     if (dir === null) throw new FilesError("not_found", "That rule is missing");
     return parseRule(name, readText(root, dir, `${name}.mdc`));
   }
 
-  function writeRule(rule: Rule): Rule {
+  function writeRule(repoPath: string, rule: Rule): Rule {
     assertName(rule.name);
     assertSize(rule.description, rule.globs, rule.body);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const dir = ensureInside(root, [".cursor", "rules"]);
     const stored: Rule = {
       name: rule.name,
@@ -102,17 +102,17 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     return parseRule(rule.name, readText(root, dir, `${rule.name}.mdc`));
   }
 
-  function deleteRule(name: string): void {
+  function deleteRule(repoPath: string, name: string): void {
     assertName(name);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const dir = existingDir(root, [".cursor", "rules"]);
     if (dir === null) throw new FilesError("not_found", "That rule is missing");
     removeFile(root, dir, `${name}.mdc`, "That rule is missing");
     touch(root);
   }
 
-  function listSkills(): SkillSummary[] {
-    const root = projectRoot(options.folder());
+  function listSkills(repoPath: string): SkillSummary[] {
+    const root = projectRoot(repoPath);
     const dir = existingDir(root, [".cursor", "skills"]);
     if (dir === null) return [];
     const summaries: SkillSummary[] = [];
@@ -127,26 +127,26 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     return summaries;
   }
 
-  function readSkill(name: string): Skill {
+  function readSkill(repoPath: string, name: string): Skill {
     assertName(name);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const dir = skillDir(root, name);
     return parseSkill(name, readText(root, dir, "SKILL.md"));
   }
 
-  function writeSkill(skill: Skill): Skill {
+  function writeSkill(repoPath: string, skill: Skill): Skill {
     assertName(skill.name);
     assertSize(skill.description, "", skill.body);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const dir = ensureInside(root, [".cursor", "skills", skill.name]);
     const stored: Skill = { name: skill.name, description: skill.description.trim(), body: skill.body };
     commitFile(root, dir, "SKILL.md", renderSkill(stored), touch);
     return parseSkill(skill.name, readText(root, dir, "SKILL.md"));
   }
 
-  function deleteSkill(name: string): void {
+  function deleteSkill(repoPath: string, name: string): void {
     assertName(name);
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const skillsRoot = existingDir(root, [".cursor", "skills"]);
     if (skillsRoot === null) throw new FilesError("not_found", "That skill is missing");
     const dir = path.join(skillsRoot, name);
@@ -177,8 +177,8 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     touch(root);
   }
 
-  function readAgents(): { body: string } {
-    const root = projectRoot(options.folder());
+  function readAgents(repoPath: string): { body: string } {
+    const root = projectRoot(repoPath);
     const target = path.join(root, "AGENTS.md");
     try {
       const info = lstatSync(target);
@@ -191,12 +191,12 @@ export function createRulesSkills(options: { folder(): string | null }): RulesSk
     return { body: stripFinalNewline(readText(root, root, "AGENTS.md")) };
   }
 
-  function writeAgents(body: string): { body: string } {
+  function writeAgents(repoPath: string, body: string): { body: string } {
     if (body.length > MAX_BODY) throw new FilesError("io_error", "That file is too large to edit here");
-    const root = projectRoot(options.folder());
+    const root = projectRoot(repoPath);
     const contents = body.length === 0 ? "" : `${stripFinalNewline(body)}\n`;
     commitFile(root, root, "AGENTS.md", contents, touch);
-    return readAgents();
+    return readAgents(repoPath);
   }
 
   return {

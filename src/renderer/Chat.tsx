@@ -6,6 +6,8 @@ import { modelChoices, ThemeSwitch } from "./Setup.js";
 import type { Banner, Item, ModelChoice } from "./state.js";
 
 type ChatProps = {
+  repoName: string;
+  workspaceBusy: boolean;
   folder: string;
   model: string;
   models: ModelChoice[];
@@ -54,8 +56,8 @@ export function Chat(props: ChatProps) {
         <Bot kind="agent" running={busy} />
         <div className="titles">
           <h2>Mango</h2>
-          <span className="meta" title={props.folder}>
-            {folderName(props.folder)}
+          <span className="meta" title={props.repoName === "." ? props.folder : props.repoName}>
+            {props.repoName === "." ? folderName(props.folder) : props.repoName}
           </span>
         </div>
         <div className="spacer">
@@ -66,7 +68,7 @@ export function Chat(props: ChatProps) {
             id="header-model"
             className="model-picker"
             value={props.model}
-            disabled={busy || props.pending || choices.length === 0}
+            disabled={busy || props.workspaceBusy || props.pending || choices.length === 0}
             onChange={(event) => {
               const model = event.target.value;
               if (model !== "" && model !== props.model) void props.onModel(model);
@@ -80,12 +82,12 @@ export function Chat(props: ChatProps) {
           </select>
           <ThemeSwitch theme={props.theme} onTheme={props.onTheme} />
           <button type="button" className="btn" disabled={busy || props.pending} onClick={() => setConfirmReset(true)}>
-            New chat
+            Reset chat
           </button>
           <button type="button" className="btn" onClick={props.onInstructions}>
             Rules
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={props.onSetup}>
+          <button type="button" className="btn" disabled={busy || props.workspaceBusy} onClick={props.onSetup}>
             Setup
           </button>
         </div>
@@ -93,8 +95,8 @@ export function Chat(props: ChatProps) {
       {confirmReset ? (
         <div className="dialog-back">
           <div className="dialog" role="dialog" aria-labelledby="reset-title">
-            <h2 id="reset-title">Start a new chat?</h2>
-            <p>This clears the conversation for this folder. The next message starts a new agent.</p>
+            <h2 id="reset-title">Reset chat</h2>
+            <p>This clears the conversation for this repo. The next message starts a new agent.</p>
             <div className="actions">
               <button type="button" className="btn" onClick={() => setConfirmReset(false)}>
                 Cancel
@@ -107,7 +109,7 @@ export function Chat(props: ChatProps) {
                   props.onReset();
                 }}
               >
-                New chat
+                Reset chat
               </button>
             </div>
           </div>
@@ -150,7 +152,7 @@ export function Chat(props: ChatProps) {
           <div className="empty">
             <Bot kind="agent" large />
             <h2>No messages yet</h2>
-            <p>Messages start here. The agent works in the folder you chose.</p>
+            <p>Messages start here. The agent works in this repo.</p>
           </div>
         ) : (
           props.items.map((item) => (

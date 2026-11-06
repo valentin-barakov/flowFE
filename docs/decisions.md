@@ -29,16 +29,16 @@ A custom tool with Cursor's AskQuestion schema. Its `execute` awaits the form an
 **Rejected:** native `askQuestion` (the spike showed it is not callable headless); parsing questions out of the assistant's text (fragile, no blocking); a second chat turn as the answer (the form would not be tied to the run).
 **Still open:** a wait of several minutes was not measured. The 5 second wait was.
 
-### D-5: One chat per folder (accepted)
+### D-5: One chat per repo (accepted)
 
-The chat file is `chats/<folderId>.json`. "New chat" drops the `agentId` and messages.
-**Reason:** Valentin chose this on 2026-11-05. It is the smallest model that matches "run an agent in a folder".
-**Rejected:** several chats per folder (needs a list UI and a separate `agentId` for each).
+The saved folder is a workspace. Each git repo in it has one chat file, `chats/<sha256 of the repo real path>.json`, and one agent. Agents in different repos run at the same time. A second agent in the same repo is refused. "Reset chat" drops that repo's `agentId` and messages. The home screen picks a repo with `@name`. A workspace that is itself one repo, or that contains no repos, has one chat and no home screen.
+**Reason:** Valentin, 2026-11-06. One agent per repo keeps that repo on one branch. Parallel repos are the point of the workspace.
+**Rejected:** several chats per repo (needs a list and a separate `agentId` for each); one agent for the whole workspace (cannot run two repos at once).
 
 ### D-6: Persistence is JSON files with atomic writes, no database (accepted)
 
 `settings.json`, `chats/<folderId>.json`, and `secrets.bin` in `userData`. One writer in main; temp file plus rename.
-**Reason:** one conversation per folder and a small message list. A database adds a dependency and a native build for no query need.
+**Reason:** one conversation per repo and a small message list. A database adds a dependency and a native build for no query need.
 **Rejected:** SQLite (out of scope in the plan); `localStorage` in the renderer (renderer must hold no state main needs).
 
 ### D-7: Restart never assumes `Agent.resume` works (accepted, from evidence)
@@ -79,7 +79,7 @@ The agent can run shell and edit tools. This version has no toggle that removes 
 
 | ID | Question | Answer | Owner |
 |----|----------|--------|-------|
-| Q-1 | One chat per folder, or several? | **Answered (Valentin, 2026-11-05):** one chat per folder. See D-5 | none |
+| Q-1 | One chat per folder, or several? | **Answered (Valentin, 2026-11-06):** one chat per repo inside a workspace folder. Several repos run at once. See D-5 | none |
 | Q-2 | Edit user-level rules and skills in `~/.cursor`? | **Answered (Valentin, 2026-11-05):** do not edit them. Override them for this agent. See D-11 | none |
 | Q-3 | How many past messages to seed on a failed resume? | **Answered (Valentin, 2026-11-05):** the last 20 messages, text only. See D-7 | none |
 | Q-4 | A read-only mode (no shell or edit tools)? | **Answered (Valentin, 2026-11-05):** not in v1. See D-12 | none |

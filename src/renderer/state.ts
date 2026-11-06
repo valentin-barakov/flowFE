@@ -1,4 +1,4 @@
-import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Question, Settings } from "../shared/ipc.js";
+import type { Answers, ChatStateName, FlowEvent, Message, PendingQuestion, Question, RepoListItem, Settings } from "../shared/ipc.js";
 
 export type Item =
   | { id: string; role: "user"; text: string; at: string }
@@ -26,10 +26,8 @@ export type Banner = {
 
 export type ModelChoice = { id: string; label: string };
 
-export type AppState = {
-  booted: boolean;
-  editing: boolean;
-  settings: Settings | null;
+export type ChatSlice = {
+  loaded: boolean;
   items: Item[];
   chatState: ChatStateName;
   activeRunId: string | null;
@@ -38,107 +36,205 @@ export type AppState = {
   draft: string;
   notice: string | null;
   banner: Banner | null;
-  models: ModelChoice[];
-  modelsError: string | null;
   lastUserText: string | null;
-  instructionsOpen: boolean;
   instructionsPending: boolean;
   pendingQuestionId: string | null;
+  unseen: boolean;
 };
+
+export type View = { kind: "home" } | { kind: "repo"; repo: string };
+
+export type AppState = {
+  booted: boolean;
+  editing: boolean;
+  settings: Settings | null;
+  banner: Banner | null;
+  models: ModelChoice[];
+  modelsError: string | null;
+  instructionsOpen: boolean;
+  view: View;
+  repos: RepoListItem[];
+  chats: Record<string, ChatSlice>;
+  homeDraft: string;
+  homeNotice: string | null;
+};
+
+export function emptySlice(): ChatSlice {
+  return {
+    loaded: false,
+    items: [],
+    chatState: "needsSetup",
+    activeRunId: null,
+    sealedRunId: null,
+    liveAgentId: null,
+    draft: "",
+    notice: null,
+    banner: null,
+    lastUserText: null,
+    instructionsPending: false,
+    pendingQuestionId: null,
+    unseen: false,
+  };
+}
+
+export function isBusyState(state: ChatStateName): boolean {
+  return state === "streaming" || state === "stopping" || state === "awaitingAnswer";
+}
+
+export function canRetry(slice: ChatSlice): boolean {
+  return slice.banner?.retryable === true && slice.lastUserText !== null && (slice.chatState === "ready" || slice.chatState === "needsSetup");
+}
+
+export function busyRepoNames(state: AppState): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const row of state.repos) {
+    seen.add(row.name);
+    if (isBusyState(shownStatus(row.state, state.chats[row.name]))) names.push(row.name);
+  }
+  for (const [name, slice] of Object.entries(state.chats)) {
+    if (seen.has(name)) continue;
+    if (isBusyState(slice.chatState)) names.push(name);
+  }
+  return names;
+}
+
+export function anyBusy(state: AppState): boolean {
+  return busyRepoNames(state).length > 0;
+}
+
+function sliceIsLive(slice: ChatSlice): boolean {
+  return slice.loaded || slice.chatState !== "needsSetup";
+}
+
+function rowFromSlice(row: RepoListItem, slice: ChatSlice): RepoListItem {
+  return {
+    ...row,
+    state: slice.chatState,
+    pendingQuestion: slice.chatState === "awaitingAnswer" || slice.pendingQuestionId !== null,
+  };
+}
+
+function shownStatus(rowState: ChatStateName, slice: ChatSlice | undefined): ChatStateName {
+  if (slice === undefined || !sliceIsLive(slice)) return rowState;
+  return rowFromSlice({ name: ".", state: rowState, pendingQuestion: false, hasHistory: false }, slice).state;
+}
 
 export type Action =
   | {
-      type: "loaded";
+      type: "boot";
       settings: Settings;
+      repos: RepoListItem[];
+      view: View;
+      repo?: string;
+      messages?: Message[];
+      chatState?: ChatStateName;
+      runId?: string;
+      instructionsPending?: boolean;
+      pendingQuestion?: PendingQuestion;
+    }
+  | { type: "boot-failed"; settings: Settings }
+  | { type: "settings"; settings: Settings; repos: RepoListItem[] }
+  | { type: "models"; models: ModelChoice[] }
+  | { type: "models-error"; message: string; code?: string }
+  | { type: "edit-setup" }
+  | { type: "close-setup" }
+  | { type: "open-instructions" }
+  | { type: "close-instructions" }
+  | { type: "open-home" }
+  | { type: "open-repo"; repo: string }
+  | {
+      type: "repo-loaded";
+      repo: string;
       messages: Message[];
       chatState: ChatStateName;
       runId?: string;
       instructionsPending: boolean;
       pendingQuestion?: PendingQuestion;
     }
-  | { type: "settings"; settings: Settings }
-  | { type: "models"; models: ModelChoice[] }
-  | { type: "models-error"; message: string; code?: string }
-  | { type: "reset-chat" }
-  | { type: "draft"; draft: string }
-  | { type: "sending"; text: string }
-  | { type: "banner"; banner: Banner | null }
-  | { type: "edit-setup" }
-  | { type: "close-setup" }
-  | { type: "open-instructions" }
-  | { type: "close-instructions" }
-  | { type: "instructions-pending"; pending: boolean }
-  | { type: "dismiss-banner" }
+  | { type: "home-draft"; draft: string }
+  | { type: "home-notice"; notice: string | null }
+  | { type: "draft"; repo: string; draft: string }
+  | { type: "sending"; repo: string; text: string }
+  | { type: "banner"; repo: string; banner: Banner | null }
+  | { type: "reset-chat"; repo: string }
   | {
       type: "run-started";
+      repo: string;
       runId: string;
       userMessageId: string;
       agentMessageId: string;
       text: string;
       restored: boolean;
     }
-  | { type: "send-failed"; messages: Message[]; chatState: ChatStateName; banner: Banner }
-  | { type: "history"; messages: Message[] }
-  | { type: "question-settled"; questionId: string; answers: Answers | null; skipped: boolean }
+  | { type: "send-failed"; repo: string; messages: Message[]; chatState: ChatStateName; banner: Banner }
+  | { type: "history"; repo: string; messages: Message[] }
+  | { type: "instructions-pending"; repo: string; pending: boolean }
+  | { type: "dismiss-banner"; repo: string }
+  | { type: "question-settled"; repo: string; questionId: string; answers: Answers | null; skipped: boolean }
+  | { type: "repos"; repos: RepoListItem[] }
   | { type: "event"; event: FlowEvent };
 
 export const initialState: AppState = {
   booted: false,
   editing: false,
   settings: null,
-  items: [],
-  chatState: "needsSetup",
-  activeRunId: null,
-  sealedRunId: null,
-  liveAgentId: null,
-  draft: "",
-  notice: null,
   banner: null,
   models: [],
   modelsError: null,
-  lastUserText: null,
   instructionsOpen: false,
-  instructionsPending: false,
-  pendingQuestionId: null,
+  view: { kind: "home" },
+  repos: [],
+  chats: {},
+  homeDraft: "",
+  homeNotice: null,
 };
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "loaded": {
-      const pendingQuestionId = action.pendingQuestion?.questionId ?? null;
-      const live = action.chatState === "streaming" || action.chatState === "stopping" || action.chatState === "awaitingAnswer";
-      const stored = toItems(action.messages, pendingQuestionId);
-      const items = withPending(stored, action.pendingQuestion, lastAgentId(stored));
+    case "boot": {
+      const chats: Record<string, ChatSlice> = {};
+      if (action.repo !== undefined) {
+        chats[action.repo] = loadedSlice(
+          emptySlice(),
+          action.messages ?? [],
+          action.chatState ?? "needsSetup",
+          action.runId,
+          action.instructionsPending ?? false,
+          action.pendingQuestion,
+          action.settings.folderMissing,
+        );
+      }
       return {
         ...state,
         booted: true,
         settings: action.settings,
-        items,
-        chatState: action.chatState,
-        activeRunId: live && action.runId ? action.runId : null,
-        liveAgentId: live ? lastAgentId(items) : null,
-        lastUserText: lastUserText(items),
-        instructionsPending: action.instructionsPending,
-        pendingQuestionId,
+        repos: action.repos,
+        view: action.view,
+        chats,
         banner: action.settings.folderMissing ? folderBanner() : null,
       };
     }
+    case "boot-failed":
+      return {
+        ...state,
+        booted: true,
+        settings: action.settings,
+        repos: [],
+        view: { kind: "home" },
+      };
     case "settings": {
       const folderChanged = state.settings?.folder !== action.settings.folder;
       const becameMissing = action.settings.folderMissing && state.settings?.folderMissing !== true;
       return {
         ...state,
         settings: action.settings,
+        repos: action.repos,
         editing: action.settings.setupComplete ? state.editing : false,
         instructionsOpen: folderChanged ? false : state.instructionsOpen,
-        instructionsPending: folderChanged ? false : state.instructionsPending,
-        items: folderChanged ? [] : state.items,
-        notice: folderChanged ? null : state.notice,
+        chats: folderChanged ? {} : state.chats,
+        view: folderChanged ? viewForRepos(action.repos) : state.view,
         banner: folderChanged || becameMissing ? (action.settings.folderMissing ? folderBanner() : null) : state.banner,
-        activeRunId: folderChanged ? null : state.activeRunId,
-        liveAgentId: folderChanged ? null : state.liveAgentId,
-        sealedRunId: folderChanged ? null : state.sealedRunId,
-        pendingQuestionId: folderChanged ? null : state.pendingQuestionId,
       };
     }
     case "models":
@@ -149,9 +245,78 @@ export function reducer(state: AppState, action: Action): AppState {
         modelsError: action.message,
         banner: action.code === "auth" ? bannerFor("auth", action.message, false) : state.banner,
       };
-    case "reset-chat":
+    case "edit-setup":
+      return { ...state, editing: true, instructionsOpen: false };
+    case "close-setup":
+      return { ...state, editing: false };
+    case "open-instructions":
+      if (state.view.kind !== "repo") return state;
+      return { ...state, instructionsOpen: true };
+    case "close-instructions":
+      return { ...state, instructionsOpen: false };
+    case "open-home":
+      return { ...state, view: { kind: "home" }, instructionsOpen: false };
+    case "open-repo": {
+      const current = state.chats[action.repo] ?? emptySlice();
       return {
         ...state,
+        view: { kind: "repo", repo: action.repo },
+        instructionsOpen: false,
+        chats: { ...state.chats, [action.repo]: { ...current, unseen: false } },
+      };
+    }
+    case "repo-loaded":
+      return {
+        ...state,
+        chats: {
+          ...state.chats,
+          [action.repo]: loadedSlice(
+            state.chats[action.repo] ?? emptySlice(),
+            action.messages,
+            action.chatState,
+            action.runId,
+            action.instructionsPending,
+            action.pendingQuestion,
+            state.settings?.folderMissing === true,
+          ),
+        },
+        repos: state.repos.map((row) =>
+          row.name === action.repo
+            ? {
+                ...row,
+                state: action.chatState,
+                pendingQuestion: action.pendingQuestion !== undefined,
+                hasHistory: action.messages.length > 0,
+              }
+            : row,
+        ),
+      };
+    case "repos":
+      return { ...state, repos: mergeListedRepos(state, action.repos) };
+    case "home-draft":
+      return { ...state, homeDraft: action.draft };
+    case "home-notice":
+      return { ...state, homeNotice: action.notice };
+    case "draft":
+      return withSlice(state, action.repo, (slice) => ({ ...slice, draft: action.draft }));
+    case "sending": {
+      const current = state.chats[action.repo] ?? emptySlice();
+      const slice: ChatSlice = {
+        ...current,
+        chatState: "streaming",
+        draft: "",
+        lastUserText: action.text,
+        banner: null,
+        notice: null,
+      };
+      return { ...placeSlice(state, action.repo, slice), homeDraft: "", homeNotice: null };
+    }
+    case "banner":
+      return withSlice(state, action.repo, (slice) => ({ ...slice, banner: action.banner }));
+    case "reset-chat": {
+      const current = state.chats[action.repo] ?? emptySlice();
+      const slice: ChatSlice = {
+        ...current,
         items: [],
         draft: "",
         notice: null,
@@ -163,28 +328,12 @@ export function reducer(state: AppState, action: Action): AppState {
         lastUserText: null,
         pendingQuestionId: null,
       };
-    case "draft":
-      return { ...state, draft: action.draft };
-    case "sending":
-      return { ...state, chatState: "streaming", draft: "", lastUserText: action.text, banner: null, notice: null };
-    case "banner":
-      return { ...state, banner: action.banner };
-    case "edit-setup":
-      return { ...state, editing: true, instructionsOpen: false };
-    case "close-setup":
-      return { ...state, editing: false };
-    case "open-instructions":
-      return { ...state, instructionsOpen: true };
-    case "close-instructions":
-      return { ...state, instructionsOpen: false };
-    case "instructions-pending":
-      return { ...state, instructionsPending: action.pending };
-    case "dismiss-banner":
-      return { ...state, banner: null };
+      return placeSlice(state, action.repo, slice, { hasHistory: false });
+    }
     case "run-started": {
       const at = new Date().toISOString();
-      return {
-        ...state,
+      const next = withSlice(state, action.repo, (slice) => ({
+        ...slice,
         chatState: "streaming",
         activeRunId: action.runId,
         sealedRunId: null,
@@ -196,50 +345,69 @@ export function reducer(state: AppState, action: Action): AppState {
         draft: "",
         lastUserText: action.text,
         items: [
-          ...state.items,
+          ...slice.items,
           { id: action.userMessageId, role: "user", text: action.text, at },
           { id: action.agentMessageId, role: "agent", text: "", at, status: "interrupted" },
         ],
+      }));
+      return {
+        ...next,
+        repos: next.repos.map((row) => (row.name === action.repo ? { ...row, state: "streaming", hasHistory: true } : row)),
       };
     }
     case "send-failed": {
-      const items = toItems(action.messages, state.pendingQuestionId);
-      return {
-        ...state,
+      const current = state.chats[action.repo] ?? emptySlice();
+      const items = toItems(action.messages, current.pendingQuestionId);
+      const slice: ChatSlice = {
+        ...current,
         items,
         chatState: action.chatState,
         banner: action.banner,
         activeRunId: null,
         liveAgentId: null,
-        lastUserText: lastUserText(items) ?? state.lastUserText,
+        lastUserText: lastUserText(items) ?? current.lastUserText,
       };
+      return placeSlice(state, action.repo, slice);
     }
-    case "question-settled":
-      return {
-        ...state,
-        pendingQuestionId: state.pendingQuestionId === action.questionId ? null : state.pendingQuestionId,
-        chatState: state.chatState === "awaitingAnswer" && state.pendingQuestionId === action.questionId ? "streaming" : state.chatState,
-        items: state.items.map((item) => {
+    case "history": {
+      const slice = state.chats[action.repo] ?? emptySlice();
+      if (slice.activeRunId !== null && slice.sealedRunId !== slice.activeRunId) return state;
+      const items = toItems(action.messages, slice.pendingQuestionId);
+      return withSlice(state, action.repo, () => ({
+        ...slice,
+        items,
+        lastUserText: lastUserText(items) ?? slice.lastUserText,
+      }));
+    }
+    case "instructions-pending":
+      return withSlice(state, action.repo, (slice) => ({ ...slice, instructionsPending: action.pending }));
+    case "dismiss-banner":
+      return withSlice(state, action.repo, (slice) => ({ ...slice, banner: null }));
+    case "question-settled": {
+      const current = state.chats[action.repo] ?? emptySlice();
+      const slice: ChatSlice = {
+        ...current,
+        pendingQuestionId: current.pendingQuestionId === action.questionId ? null : current.pendingQuestionId,
+        chatState: current.chatState === "awaitingAnswer" && current.pendingQuestionId === action.questionId ? "streaming" : current.chatState,
+        items: current.items.map((item) => {
           if (item.role !== "question" || item.questionId !== action.questionId || item.cancelled) return item;
           return { ...item, open: false, cancelled: false, skipped: action.skipped, answers: action.answers };
         }),
       };
-    case "history": {
-      if (state.activeRunId !== null && state.sealedRunId !== state.activeRunId) return state;
-      const items = toItems(action.messages, state.pendingQuestionId);
-      return { ...state, items, lastUserText: lastUserText(items) ?? state.lastUserText };
+      return placeSlice(state, action.repo, slice);
     }
     case "event":
-      return applyEvent(state, action.event);
+      return routeEvent(state, action.event);
     default:
       return state;
   }
 }
 
-export function screenOf(state: AppState): "loading" | "setup" | "chat" | "instructions" {
+export function screenOf(state: AppState): "loading" | "setup" | "instructions" | "home" | "chat" {
   if (!state.booted || state.settings === null) return "loading";
   if (!state.settings.setupComplete || state.editing) return "setup";
-  if (state.instructionsOpen) return "instructions";
+  if (state.instructionsOpen && state.view.kind === "repo") return "instructions";
+  if (state.view.kind === "home") return "home";
   return "chat";
 }
 
@@ -260,9 +428,9 @@ export function toItems(messages: readonly Message[], openQuestionId: string | n
   });
 }
 
-function applyEvent(state: AppState, event: FlowEvent): AppState {
+function applyEvent(state: ChatSlice, event: FlowEvent): ChatSlice {
   if (event.type === "chat.state") {
-    const busy = event.state === "streaming" || event.state === "stopping" || event.state === "awaitingAnswer";
+    const busy = isBusyState(event.state);
     return {
       ...state,
       chatState: event.state,
@@ -335,6 +503,42 @@ function applyEvent(state: AppState, event: FlowEvent): AppState {
       if (item.role === "question" && item.open) return { ...item, open: false, cancelled: true };
       if (item.id === agentId && item.role === "agent") return { ...item, status: "error" };
       return item;
+    }),
+  };
+}
+
+function routeEvent(state: AppState, event: FlowEvent): AppState {
+  const known = state.repos.some((row) => row.name === event.repo) || state.chats[event.repo] !== undefined;
+  if (!known) return state;
+  const current = state.chats[event.repo] ?? emptySlice();
+  const applied = applyEvent(current, event);
+  if (applied === current) return state;
+  let slice = applied;
+  const onScreen = state.view.kind === "repo" && state.view.repo === event.repo;
+  if (!onScreen && (event.type === "chat.done" || event.type === "chat.error" || event.type === "question.asked")) {
+    slice = { ...slice, unseen: true };
+  }
+  const markHistory =
+    event.type === "chat.delta" ||
+    event.type === "chat.tool" ||
+    event.type === "chat.done" ||
+    event.type === "chat.error" ||
+    event.type === "question.asked";
+  const finished = event.type === "chat.done" || event.type === "chat.error";
+  const stateChanged = slice.chatState !== current.chatState;
+  const questionChanged = stateChanged || slice.pendingQuestionId !== current.pendingQuestionId;
+  return {
+    ...state,
+    chats: { ...state.chats, [event.repo]: slice },
+    repos: state.repos.map((row) => {
+      if (row.name !== event.repo) return row;
+      const fromSlice = rowFromSlice(row, slice);
+      return {
+        ...fromSlice,
+        state: stateChanged ? fromSlice.state : finished ? "ready" : row.state,
+        pendingQuestion: finished ? false : questionChanged ? fromSlice.pendingQuestion : row.pendingQuestion,
+        hasHistory: markHistory ? true : row.hasHistory,
+      };
     }),
   };
 }
@@ -459,4 +663,61 @@ function lastUserText(items: readonly Item[]): string | null {
     if (item?.role === "user") return item.text;
   }
   return null;
+}
+
+function withSlice(state: AppState, repo: string, update: (slice: ChatSlice) => ChatSlice): AppState {
+  const current = state.chats[repo] ?? emptySlice();
+  return { ...state, chats: { ...state.chats, [repo]: update(current) } };
+}
+
+function placeSlice(state: AppState, repo: string, slice: ChatSlice, patch?: Partial<Pick<RepoListItem, "hasHistory">>): AppState {
+  return {
+    ...state,
+    chats: { ...state.chats, [repo]: slice },
+    repos: state.repos.map((row) => (row.name === repo ? { ...rowFromSlice(row, slice), ...patch } : row)),
+  };
+}
+
+function mergeListedRepos(state: AppState, listed: readonly RepoListItem[]): RepoListItem[] {
+  return listed.map((repo) => {
+    const slice = state.chats[repo.name];
+    if (slice === undefined || !sliceIsLive(slice)) return repo;
+    return {
+      ...rowFromSlice(repo, slice),
+      hasHistory: repo.hasHistory || slice.items.length > 0,
+    };
+  });
+}
+
+function loadedSlice(
+  base: ChatSlice,
+  messages: readonly Message[],
+  chatState: ChatStateName,
+  runId: string | undefined,
+  instructionsPending: boolean,
+  pendingQuestion: PendingQuestion | undefined,
+  folderMissing: boolean,
+): ChatSlice {
+  const pendingQuestionId = pendingQuestion?.questionId ?? null;
+  const live = isBusyState(chatState);
+  const stored = toItems(messages, pendingQuestionId);
+  const items = withPending(stored, pendingQuestion, lastAgentId(stored));
+  return {
+    ...base,
+    loaded: true,
+    items,
+    chatState,
+    activeRunId: live && runId ? runId : null,
+    liveAgentId: live ? lastAgentId(items) : null,
+    lastUserText: lastUserText(items),
+    instructionsPending,
+    pendingQuestionId,
+    banner: folderMissing ? folderBanner() : null,
+  };
+}
+
+function viewForRepos(repos: readonly RepoListItem[]): View {
+  const only = repos.length === 1 ? repos[0] : undefined;
+  if (only === undefined) return { kind: "home" };
+  return { kind: "repo", repo: only.name };
 }

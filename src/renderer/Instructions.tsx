@@ -6,6 +6,7 @@ import type { Banner } from "./state.js";
 type Mode = "rules" | "skills" | "agents";
 
 type InstructionsProps = {
+  repo: string;
   banner: Banner | null;
   canRetry: boolean;
   onBack: () => void;
@@ -15,7 +16,7 @@ type InstructionsProps = {
   onSetup: () => void;
 };
 
-export function Instructions({ banner, canRetry, onBack, onChanged, onDismiss, onRetry, onSetup }: InstructionsProps) {
+export function Instructions({ repo, banner, canRetry, onBack, onChanged, onDismiss, onRetry, onSetup }: InstructionsProps) {
   const [mode, setMode] = useState<Mode>("rules");
   const dirty = useRef({ rules: false, skills: false, agents: false });
 
@@ -71,19 +72,19 @@ export function Instructions({ banner, canRetry, onBack, onChanged, onDismiss, o
         </button>
       </div>
       <div className="editor-pane" hidden={mode !== "rules"}>
-        <RulesEditor onChanged={onChanged} onDirty={(value) => { dirty.current.rules = value; }} />
+        <RulesEditor repo={repo} onChanged={onChanged} onDirty={(value) => { dirty.current.rules = value; }} />
       </div>
       <div className="editor-pane" hidden={mode !== "skills"}>
-        <SkillsEditor onChanged={onChanged} onDirty={(value) => { dirty.current.skills = value; }} />
+        <SkillsEditor repo={repo} onChanged={onChanged} onDirty={(value) => { dirty.current.skills = value; }} />
       </div>
       <div className="editor-pane" hidden={mode !== "agents"}>
-        <AgentsEditor onChanged={onChanged} onDirty={(value) => { dirty.current.agents = value; }} />
+        <AgentsEditor repo={repo} onChanged={onChanged} onDirty={(value) => { dirty.current.agents = value; }} />
       </div>
     </section>
   );
 }
 
-function AgentsEditor({ onChanged, onDirty }: { onChanged: () => Promise<boolean>; onDirty: (dirty: boolean) => void }) {
+function AgentsEditor({ repo, onChanged, onDirty }: { repo: string; onChanged: () => Promise<boolean>; onDirty: (dirty: boolean) => void }) {
   const [body, setBody] = useState("");
   const [baseline, setBaseline] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +98,7 @@ function AgentsEditor({ onChanged, onDirty }: { onChanged: () => Promise<boolean
 
   useEffect(() => {
     let cancelled = false;
-    void window.flow.invoke("flow:agentsmd.read", {}).then((result) => {
+    void window.flow.invoke("flow:agentsmd.read", { repo }).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setError(result.error.message);
@@ -109,7 +110,7 @@ function AgentsEditor({ onChanged, onDirty }: { onChanged: () => Promise<boolean
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [repo]);
 
   async function save(): Promise<void> {
     if (!dirty) {
@@ -118,7 +119,7 @@ function AgentsEditor({ onChanged, onDirty }: { onChanged: () => Promise<boolean
     }
     setBusy(true);
     setError(null);
-    const result = await window.flow.invoke("flow:agentsmd.write", { body });
+    const result = await window.flow.invoke("flow:agentsmd.write", { repo, body });
     setBusy(false);
     if (!result.ok) {
       setError(result.error.message);

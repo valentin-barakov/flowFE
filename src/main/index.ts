@@ -3,11 +3,11 @@
 import { app, BrowserWindow, nativeImage, safeStorage } from "electron";
 import { existsSync, renameSync } from "node:fs";
 import path from "node:path";
-import { QuestionRejected, QUESTION_CANCELLED, type AskUser } from "../shared/questions.js";
+import { QuestionRejected, QUESTION_CANCELLED } from "../shared/questions.js";
 import { createAgentService } from "./agent-service.js";
-import { createChatSession } from "./chat-session.js";
 import { publish, registerIpc, type IpcHost } from "./ipc.js";
 import { createRulesSkills } from "./rules-skills-service.js";
+import { createSessionManager } from "./session-manager.js";
 import { createSettingsStore } from "./settings-store.js";
 import { createMainWindow } from "./window.js";
 
@@ -49,31 +49,28 @@ function adoptLegacyData(): void {
 function start(): void {
   applyDockIcon();
   const store = createSettingsStore({ userDataDir: app.getPath("userData"), secrets: safeStorage });
-  const files = createRulesSkills({ folder: () => store.view().folder });
-  const askBridge: { ask: AskUser | null } = { ask: null };
-  const agents = createAgentService({
-    ask(request) {
-      const ask = askBridge.ask;
-      if (ask === null) return Promise.reject(new QuestionRejected("cancelled", QUESTION_CANCELLED));
-      return ask(request);
+  const files = createRulesSkills();
+  const models = createAgentService({
+    ask() {
+      return Promise.reject(new QuestionRejected("cancelled", QUESTION_CANCELLED));
     },
   });
-  const session = createChatSession({
+  const manager = createSessionManager({
     store,
-    agents,
     files,
     emit: (event) => publish(host, event),
+    listModels: (key) => models.listModels(key),
+    createAgents: (ask) => createAgentService({ ask }),
   });
-  askBridge.ask = (request) => session.ask(request);
-  registerIpc(host, session, files);
+  registerIpc(host, manager, files);
   attach(createMainWindow(distDir));
   app.on("activate", () => {
     if (host.window === null) attach(createMainWindow(distDir));
   });
   app.on("before-quit", (event) => {
-    if (session.isShuttingDown()) return;
+    if (manager.isShuttingDown()) return;
     event.preventDefault();
-    void session.shutdown().finally(() => app.quit());
+    void manager.shutdown().finally(() => app.quit());
   });
 }
 

@@ -8,6 +8,8 @@ type SetupProps = {
   models: ModelChoice[];
   modelsError: string | null;
   pending: boolean;
+  repos: { name: string }[];
+  locked: boolean;
   onSaveKey: (key: string) => Promise<boolean>;
   onClearKey: () => Promise<void>;
   onPickFolder: () => Promise<void>;
@@ -16,7 +18,7 @@ type SetupProps = {
   onBack: (() => void) | null;
 };
 
-export function Setup({ settings, models, modelsError, pending, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onBack }: SetupProps) {
+export function Setup({ settings, models, modelsError, pending, repos, locked, onSaveKey, onClearKey, onPickFolder, onModel, onTheme, onBack }: SetupProps) {
   const [replacing, setReplacing] = useState(false);
   const [key, setKey] = useState("");
   const showKeyField = !settings.keySet || replacing;
@@ -59,11 +61,11 @@ export function Setup({ settings, models, modelsError, pending, onSaveKey, onCle
               placeholder={settings.keySet ? "Paste a new key" : "Paste your Cursor API key"}
               onChange={(event) => setKey(event.target.value)}
             />
-            <button type="button" className="btn primary" disabled={pending || key.trim() === ""} onClick={() => void saveKey()}>
+            <button type="button" className="btn primary" disabled={pending || locked || key.trim() === ""} onClick={() => void saveKey()}>
               Save key
             </button>
             {settings.keySet ? (
-              <button type="button" className="btn" disabled={pending} onClick={() => setReplacing(false)}>
+              <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(false)}>
                 Cancel
               </button>
             ) : null}
@@ -71,32 +73,35 @@ export function Setup({ settings, models, modelsError, pending, onSaveKey, onCle
         ) : (
           <div className="secret">
             <span>Key saved</span>
-            <button type="button" className="btn" disabled={pending} onClick={() => setReplacing(true)}>
+            <button type="button" className="btn" disabled={pending || locked} onClick={() => setReplacing(true)}>
               Replace
             </button>
-            <button type="button" className="btn danger" disabled={pending} onClick={() => void onClearKey()}>
+            <button type="button" className="btn danger" disabled={pending || locked} onClick={() => void onClearKey()}>
               Remove
             </button>
           </div>
         )}
 
-        <label>Folder</label>
+        <label>Workspace folder</label>
         <div className="secret">
-          <button type="button" className="btn" disabled={pending} onClick={() => void onPickFolder()}>
+          <button type="button" className="btn" disabled={pending || locked} onClick={() => void onPickFolder()}>
             Choose folder
           </button>
           <span className="path" title={settings.folder ?? undefined}>
             {settings.folder ?? "No folder yet"}
           </span>
         </div>
-        <p className="warn">The agent can run shell commands and edit files in this folder without asking you first.</p>
-        <p className="warn">Rules and skills from this folder are loaded. The agent may also see other instruction sources.</p>
+        {repos.length > 0 ? (
+          <p className="meta">{repos.map((repo) => (repo.name === "." ? "This folder" : repo.name)).join(", ")}</p>
+        ) : null}
+        <p className="warn">The agent can run shell commands and edit files in these repos without asking you first.</p>
+        <p className="warn">Rules and skills from the repo you message are loaded. The agent may also see other instruction sources.</p>
 
         <label htmlFor="model">Model</label>
         <select
           id="model"
           value={settings.model ?? ""}
-          disabled={pending || !settings.keySet || choices.length === 0}
+          disabled={pending || locked || !settings.keySet || choices.length === 0}
           onChange={(event) => {
             const model = event.target.value;
             if (model !== "") void onModel(model);

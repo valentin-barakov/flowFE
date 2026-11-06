@@ -29,7 +29,34 @@ export type Theme = z.infer<typeof ThemeSchema>;
 export const ChatStateSchema = z.enum(["needsSetup", "ready", "streaming", "stopping", "awaitingAnswer"]);
 export type ChatStateName = z.infer<typeof ChatStateSchema>;
 
+export const MAX_BUSY_REPOS = 7;
+
+export const BUSY_CAP_MESSAGE = "Seven agents are already running. Stop one before starting another.";
+
+export function busyRepoMessage(repoName: string): string {
+  return repoName === "." ? "A message is already running" : `${repoName} already has a running agent. Open it or stop it first.`;
+}
+
+/** A direct child directory name, or "." when the workspace folder is the only repo. */
+export const RepoNameSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (name) => name === "." || (name !== ".." && !name.includes("/") && !name.includes("\\") && !name.includes("\0")),
+    "Unknown repo",
+  );
+
+export const RepoListItemSchema = z.object({
+  name: RepoNameSchema,
+  state: ChatStateSchema,
+  pendingQuestion: z.boolean(),
+  hasHistory: z.boolean(),
+});
+export type RepoListItem = z.infer<typeof RepoListItemSchema>;
+
 export const SettingsSchema = z.object({
+  /** Workspace folder. Repos are its child git directories, or this folder when it is the only repo. */
   folder: z.string().nullable(),
   model: z.string().nullable(),
   theme: ThemeSchema,
@@ -142,15 +169,22 @@ export const COMMANDS = {
     input: None,
     output: z.object({ models: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })) }),
   },
+  "flow:repos.list": {
+    input: None,
+    output: z.object({ repos: z.array(RepoListItemSchema) }),
+  },
   "flow:chat.send": {
-    input: z.object({ text: z.string().trim().min(1).max(50_000) }).strict(),
+    input: z.object({ repo: RepoNameSchema, text: z.string().trim().min(1).max(50_000) }).strict(),
     output: SendResultSchema,
   },
-  "flow:chat.stop": { input: None, output: None },
-  "flow:chat.history": { input: None, output: z.object({ messages: z.array(MessageSchema) }) },
-  "flow:chat.reset": { input: None, output: None },
+  "flow:chat.stop": { input: z.object({ repo: RepoNameSchema }).strict(), output: None },
+  "flow:chat.history": {
+    input: z.object({ repo: RepoNameSchema }).strict(),
+    output: z.object({ messages: z.array(MessageSchema) }),
+  },
+  "flow:chat.reset": { input: z.object({ repo: RepoNameSchema }).strict(), output: None },
   "flow:chat.state": {
-    input: None,
+    input: z.object({ repo: RepoNameSchema }).strict(),
     output: z.object({
       state: ChatStateSchema,
       runId: z.string().min(1).optional(),
@@ -159,24 +193,32 @@ export const COMMANDS = {
     }),
   },
   "flow:question.answer": {
-    input: z.object({ questionId: z.string().min(1).max(80), answers: AnswersSchema }).strict(),
+    input: z
+      .object({ repo: RepoNameSchema, questionId: z.string().min(1).max(80), answers: AnswersSchema })
+      .strict(),
     output: None,
   },
   "flow:question.skip": {
-    input: z.object({ questionId: z.string().min(1).max(80) }).strict(),
+    input: z.object({ repo: RepoNameSchema, questionId: z.string().min(1).max(80) }).strict(),
     output: None,
   },
-  "flow:rules.list": { input: None, output: z.array(RuleSummarySchema) },
-  "flow:rules.read": { input: z.object({ name: NameSchema }).strict(), output: RuleSchema },
-  "flow:rules.write": { input: RuleSchema.strict(), output: RuleSchema },
-  "flow:rules.delete": { input: z.object({ name: NameSchema }).strict(), output: None },
-  "flow:skills.list": { input: None, output: z.array(SkillSummarySchema) },
-  "flow:skills.read": { input: z.object({ name: NameSchema }).strict(), output: SkillSchema },
-  "flow:skills.write": { input: SkillSchema.strict(), output: SkillSchema },
-  "flow:skills.delete": { input: z.object({ name: NameSchema }).strict(), output: None },
-  "flow:agentsmd.read": { input: None, output: z.object({ body: z.string() }) },
+  "flow:rules.list": { input: z.object({ repo: RepoNameSchema }).strict(), output: z.array(RuleSummarySchema) },
+  "flow:rules.read": { input: z.object({ repo: RepoNameSchema, name: NameSchema }).strict(), output: RuleSchema },
+  "flow:rules.write": {
+    input: RuleSchema.extend({ repo: RepoNameSchema }).strict(),
+    output: RuleSchema,
+  },
+  "flow:rules.delete": { input: z.object({ repo: RepoNameSchema, name: NameSchema }).strict(), output: None },
+  "flow:skills.list": { input: z.object({ repo: RepoNameSchema }).strict(), output: z.array(SkillSummarySchema) },
+  "flow:skills.read": { input: z.object({ repo: RepoNameSchema, name: NameSchema }).strict(), output: SkillSchema },
+  "flow:skills.write": {
+    input: SkillSchema.extend({ repo: RepoNameSchema }).strict(),
+    output: SkillSchema,
+  },
+  "flow:skills.delete": { input: z.object({ repo: RepoNameSchema, name: NameSchema }).strict(), output: None },
+  "flow:agentsmd.read": { input: z.object({ repo: RepoNameSchema }).strict(), output: z.object({ body: z.string() }) },
   "flow:agentsmd.write": {
-    input: z.object({ body: z.string().max(200_000) }).strict(),
+    input: z.object({ repo: RepoNameSchema, body: z.string().max(200_000) }).strict(),
     output: z.object({ body: z.string() }),
   },
 } as const;
@@ -190,15 +232,17 @@ export const EVENT_CHANNEL = "flow:event";
 const RunId = z.string().min(1);
 
 export const EventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("chat.state"), runId: RunId, state: ChatStateSchema }),
+  z.object({ type: z.literal("chat.state"), repo: RepoNameSchema, runId: RunId, state: ChatStateSchema }),
   z.object({
     type: z.literal("chat.delta"),
+    repo: RepoNameSchema,
     runId: RunId,
     messageId: z.string().min(1),
     text: z.string(),
   }),
   z.object({
     type: z.literal("chat.tool"),
+    repo: RepoNameSchema,
     runId: RunId,
     toolCallId: z.string().min(1),
     name: z.string().min(1),
@@ -207,12 +251,14 @@ export const EventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("chat.done"),
+    repo: RepoNameSchema,
     runId: RunId,
     messageId: z.string().min(1),
     stopReason: z.enum(["end", "stopped"]),
   }),
   z.object({
     type: z.literal("chat.error"),
+    repo: RepoNameSchema,
     runId: RunId,
     code: ErrorCodeSchema,
     message: z.string(),
@@ -220,6 +266,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("question.asked"),
+    repo: RepoNameSchema,
     runId: RunId,
     questionId: z.string().min(1),
     title: z.string().min(1).max(200).optional(),
@@ -227,6 +274,7 @@ export const EventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("question.closed"),
+    repo: RepoNameSchema,
     runId: RunId,
     questionId: z.string().min(1),
     reason: z.enum(["answered", "skipped", "cancelled"]),

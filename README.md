@@ -1,6 +1,6 @@
 # Mango
 
-A local Mac app that chats with one Cursor agent in a folder you pick. You can edit that folder's rules and skills in the app. The agent can ask you questions as a form.
+A local Mac app that chats with Cursor agents in a workspace folder you pick. Each git repo in that folder has its own chat, and agents in different repos can run at the same time. You can edit the open repo's rules and skills in the app. The agent can ask you questions as a form.
 
 The agent runs on this Mac through `@cursor/sdk` (local runtime). The model is still served by Cursor, so the app needs a Cursor API key. The key is stored with Electron `safeStorage` and is never shown again.
 
@@ -30,6 +30,10 @@ The app is written to `release/mac-arm64/Mango.app`. It is not signed and there 
 ```bash
 npm run typecheck
 npm run check:questions
+npm run check:mentions
+npm run check:repos
 ```
 
 Question-argument parsing is covered by `npm run check:questions`. File-path checks live in `scripts/phase2-files-check.mjs`.
+
+`check:mentions` covers `@repo` parsing. `check:repos` covers repo discovery and two sessions at once. `check:repos` uses `scripts/repos-check-resolve.mjs` so Node can load the app's `.js` specifiers. File-path checks stay in `scripts/phase2-files-check.mjs`.

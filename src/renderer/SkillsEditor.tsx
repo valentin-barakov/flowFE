@@ -7,11 +7,12 @@ type Draft = { name: string; description: string; body: string };
 const EMPTY: Draft = { name: "", description: "", body: "" };
 
 type SkillsEditorProps = {
+  repo: string;
   onChanged: () => Promise<boolean>;
   onDirty: (dirty: boolean) => void;
 };
 
-export function SkillsEditor({ onChanged, onDirty }: SkillsEditorProps) {
+export function SkillsEditor({ repo, onChanged, onDirty }: SkillsEditorProps) {
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [baseline, setBaseline] = useState(JSON.stringify(EMPTY));
@@ -32,10 +33,10 @@ export function SkillsEditor({ onChanged, onDirty }: SkillsEditorProps) {
   useEffect(() => {
     const current = ++token.current;
     void loadList(current);
-  }, []);
+  }, [repo]);
 
   async function loadList(current: number): Promise<void> {
-    const listed = await window.flow.invoke("flow:skills.list", {});
+    const listed = await window.flow.invoke("flow:skills.list", { repo });
     if (current !== token.current) return;
     if (!listed.ok) {
       setError(listed.error.message);
@@ -64,7 +65,7 @@ export function SkillsEditor({ onChanged, onDirty }: SkillsEditorProps) {
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     const current = ++token.current;
     setBusy(true);
-    const result = await window.flow.invoke("flow:skills.read", { name });
+    const result = await window.flow.invoke("flow:skills.read", { repo, name });
     setBusy(false);
     if (current !== token.current) return;
     if (!result.ok) {
@@ -87,6 +88,7 @@ export function SkillsEditor({ onChanged, onDirty }: SkillsEditorProps) {
     setBusy(true);
     setError(null);
     const result = await window.flow.invoke("flow:skills.write", {
+      repo,
       name,
       description: draft.description,
       body: draft.body,
@@ -110,7 +112,7 @@ export function SkillsEditor({ onChanged, onDirty }: SkillsEditorProps) {
     setConfirming(false);
     setBusy(true);
     setError(null);
-    const result = await window.flow.invoke("flow:skills.delete", { name: selected });
+    const result = await window.flow.invoke("flow:skills.delete", { repo, name: selected });
     if (!result.ok) {
       setBusy(false);
       setError(result.error.message);

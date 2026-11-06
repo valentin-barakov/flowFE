@@ -1,6 +1,6 @@
 # Chat session, questions, and recovery
 
-One chat per folder. The `chat-session` module in main owns one state, one current run, and at most one pending question. The renderer mirrors the state; it never decides it.
+One chat per repo. `session-manager` owns the map of repos. Each `RepoSession` owns one state, one current run, and at most one pending question. The renderer mirrors that state per repo; it never decides it. A workspace with several repos shows a home screen. The user picks a repo by typing `@name`. A workspace with one repo opens that chat directly.
 
 ## State machine
 
@@ -30,7 +30,11 @@ stateDiagram-v2
 
 A command sent in the wrong state returns `not_ready` or `conflict`. Changing the folder, the model, or the key, and resetting the chat, return `conflict` while the state is `streaming`, `awaitingAnswer`, or `stopping`. `folder.pick` only opens the dialog; saving the chosen folder is what checks the state.
 
-**New chat** (`chat.reset`) asks for confirmation in the window, then disposes the current agent and writes `agentId: null` with an empty message list for this folder. The window drops the thread. Rules and skills files are left as they are. The next message creates a new agent, because there is no `agentId` to resume. A missing folder returns `not_ready` with "That folder is missing." Saving a different folder, saving a new key, or clearing the key also disposes the agent and cancels a pending question.
+**Reset chat** (`chat.reset` with `repo`) asks for confirmation, then disposes that repo's agent and writes `agentId: null` with an empty message list for that repo. Other repos keep running. Rules and skills files are left as they are. A missing repo path returns `not_ready` with "That folder is missing." Saving a different workspace folder, saving a new key, or clearing the key disposes every repo agent and cancels every pending question, and is refused with `conflict` while any repo is `streaming`, `awaitingAnswer`, or `stopping`. Saving the model is refused the same way. Theme can still be saved.
+
+## Several repos
+
+Each repo runs the state machine above on its own. `flow:chat.send` for a repo that is not busy starts that repo's agent with `cwd` set to the repo path. A second send in that repo returns `conflict`. A send that would make an 8th repo busy returns `conflict` with "Seven agents are already running. Stop one before starting another." Events include `repo`, and the window applies them to that repo's transcript even when another chat is on screen. `flow:repos.list` returns each repo's name, state, whether a question is open, and whether its chat file has messages. The sidebar shows repos that are running or that have history.
 
 ## One run, step by step
 

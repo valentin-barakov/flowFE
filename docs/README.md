@@ -1,6 +1,6 @@
 # Mango documentation
 
-Mango is a small Electron + React Mac app that runs one local Cursor agent (`@cursor/sdk`, local runtime) in a folder the user picks. The user edits that folder's rules and skills in the app and chats with the agent. The agent can ask the user questions as forms.
+Mango is a small Electron + React Mac app that runs local Cursor agents (`@cursor/sdk`, local runtime) in a workspace folder the user picks. Each git repo has one chat. The user edits the open repo's rules and skills in the app and chats with that repo's agent. The agent can ask the user questions as forms.
 
 The delivery plan is [.cursor/plans/cursor_agent_mac_app_1b2c39e4.plan.md](../.cursor/plans/cursor_agent_mac_app_1b2c39e4.plan.md). These documents describe the design that plan builds.
 
@@ -14,7 +14,7 @@ The delivery plan is [.cursor/plans/cursor_agent_mac_app_1b2c39e4.plan.md](../.c
 
 ## Status
 
-The app in the repo has system, light, and dark themes, error banners, New chat, a model picker, rules and skills editing, question forms, and an unsigned local `.app`. `npm start` builds and opens the window. `npm run dist` writes `release/mac-arm64/Mango.app` and checks the unpacked SDK package. `npm run typecheck` passes. Question parsing is checked by `npm run check:questions` (`scripts/phase3-questions-check.ts`). A wait of several minutes inside a question tool is still unmeasured. The file-service checks live in `scripts/phase2-files-check.mjs`.
+The app in the repo has system, light, and dark themes, error banners, New chat, a model picker, rules and skills editing, question forms, and an unsigned local `.app`. `npm start` builds and opens the window. `npm run dist` writes `release/mac-arm64/Mango.app` and checks the unpacked SDK package. `npm run typecheck`, `npm run check:questions`, `npm run check:mentions`, and `npm run check:repos` pass. Question parsing is checked by `npm run check:questions` (`scripts/phase3-questions-check.ts`). A wait of several minutes inside a question tool is still unmeasured. The file-service checks live in `scripts/phase2-files-check.mjs`.
 
 ## Conventions
 

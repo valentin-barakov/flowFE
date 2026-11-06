@@ -11,8 +11,8 @@ import { createRulesSkills } from "../src/main/rules-skills-service.ts";
 test("rules and skills round-trip inside the folder", () => {
   const root = tempFolder();
   try {
-    const files = createRulesSkills({ folder: () => root });
-    const rule = files.writeRule({
+    const files = createRulesSkills();
+    const rule = files.writeRule(root, {
       name: "pirate",
       description: "Speak like a pirate",
       alwaysApply: true,
@@ -25,11 +25,11 @@ test("rules and skills round-trip inside the folder", () => {
     assert.match(disk, /alwaysApply: true/);
     assert.match(disk, /Always answer in pirate speak\./);
     assert.deepEqual(
-      files.listRules().map((item) => item.name),
+      files.listRules(root).map((item) => item.name),
       ["pirate"],
     );
 
-    const quoted = files.writeRule({
+    const quoted = files.writeRule(root, {
       name: "pirate",
       description: "Note: be brief",
       alwaysApply: false,
@@ -40,23 +40,23 @@ test("rules and skills round-trip inside the folder", () => {
     assert.equal(quoted.globs, "**/*.{ts,tsx}");
     assert.equal(quoted.body, "Be strict.");
 
-    const skill = files.writeSkill({
+    const skill = files.writeSkill(root, {
       name: "pirate-voice",
       description: "Answers in pirate speak",
       body: "Use pirate speak for every answer.",
     });
     assert.equal(skill.name, "pirate-voice");
     assert.equal(existsSync(path.join(root, ".cursor", "skills", "pirate-voice", "SKILL.md")), true);
-    assert.equal(files.readSkill("pirate-voice").body, "Use pirate speak for every answer.");
+    assert.equal(files.readSkill(root, "pirate-voice").body, "Use pirate speak for every answer.");
 
-    const agents = files.writeAgents("Project notes.\n");
+    const agents = files.writeAgents(root, "Project notes.\n");
     assert.equal(agents.body, "Project notes.");
-    assert.equal(files.readAgents().body, "Project notes.");
+    assert.equal(files.readAgents(root).body, "Project notes.");
 
-    files.deleteRule("pirate");
-    assert.equal(files.listRules().length, 0);
-    assert.throws(() => files.readRule("pirate"), (error) => error.code === "not_found");
-    files.deleteSkill("pirate-voice");
+    files.deleteRule(root, "pirate");
+    assert.equal(files.listRules(root).length, 0);
+    assert.throws(() => files.readRule(root, "pirate"), (error) => error.code === "not_found");
+    files.deleteSkill(root, "pirate-voice");
     assert.equal(existsSync(path.join(root, ".cursor", "skills", "pirate-voice")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -66,7 +66,7 @@ test("rules and skills round-trip inside the folder", () => {
 test("an unchanged save does not mark the folder dirty again", () => {
   const root = tempFolder();
   try {
-    const files = createRulesSkills({ folder: () => root });
+    const files = createRulesSkills();
     const rule = {
       name: "plain",
       description: "One",
@@ -74,12 +74,12 @@ test("an unchanged save does not mark the folder dirty again", () => {
       globs: "",
       body: "Hello",
     };
-    files.writeRule(rule);
+    files.writeRule(root, rule);
     const seen = files.seenDirty(root);
     assert.notEqual(seen, 0);
-    files.writeRule(rule);
+    files.writeRule(root, rule);
     assert.equal(files.seenDirty(root), seen);
-    files.writeRule({ ...rule, body: "Hello again" });
+    files.writeRule(root, { ...rule, body: "Hello again" });
     const next = files.seenDirty(root);
     assert.notEqual(next, seen);
     files.clearDirty(root, seen);
@@ -105,23 +105,23 @@ test("existing cursor files are read, and bad names are refused", () => {
       path.join(rulesDir, "listed.mdc"),
       "---\ndescription: From a list\nglobs:\n  - \"**/*.ts\"\n  - \"**/*.tsx\"\nalwaysApply: true\n---\nBody\n",
     );
-    const files = createRulesSkills({ folder: () => root });
-    const names = files.listRules().map((item) => item.name);
+    const files = createRulesSkills();
+    const names = files.listRules(root).map((item) => item.name);
     assert.deepEqual(names, ["listed", "typescript"]);
-    const typed = files.readRule("typescript");
+    const typed = files.readRule(root, "typescript");
     assert.equal(typed.description, "TypeScript defaults");
     assert.equal(typed.globs, "**/*.{ts,tsx}");
     assert.equal(typed.alwaysApply, false);
     assert.match(typed.body, /Be strict\./);
-    assert.equal(files.readRule("listed").globs, "**/*.ts, **/*.tsx");
-    assert.throws(() => files.writeRule({
+    assert.equal(files.readRule(root, "listed").globs, "**/*.ts, **/*.tsx");
+    assert.throws(() => files.writeRule(root, {
       name: "../etc",
       description: "",
       alwaysApply: false,
       globs: "",
       body: "x",
     }), (error) => error.code === "not_allowed");
-    assert.equal(files.readAgents().body, "");
+    assert.equal(files.readAgents(root).body, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -131,9 +131,9 @@ test("a symlink that leaves the folder is refused and not written through", () =
   const root = tempFolder();
   const outside = tempFolder();
   try {
-    const files = createRulesSkills({ folder: () => root });
+    const files = createRulesSkills();
     symlinkSync(outside, path.join(root, ".cursor"));
-    assert.throws(() => files.writeRule({
+    assert.throws(() => files.writeRule(root, {
       name: "pirate",
       description: "",
       alwaysApply: true,
@@ -154,8 +154,8 @@ test("a rules directory symlink that leaves the folder is refused", () => {
   try {
     mkdirSync(path.join(root, ".cursor"));
     symlinkSync(outside, path.join(root, ".cursor", "rules"));
-    const files = createRulesSkills({ folder: () => root });
-    assert.throws(() => files.writeRule({
+    const files = createRulesSkills();
+    assert.throws(() => files.writeRule(root, {
       name: "pirate",
       description: "",
       alwaysApply: true,
